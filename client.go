@@ -27,6 +27,10 @@ type Config struct {
 	MTU       int
 	License   string
 	WarpPlus  bool
+	// OnSOCKSDial, when set, is called once per SOCKS5 CONNECT with the target,
+	// the dial error (nil on success) and how long it took. It exists so a host
+	// application can surface tunnel traffic in its own logs; it must not block.
+	OnSOCKSDial func(target string, err error, took time.Duration)
 }
 
 const (

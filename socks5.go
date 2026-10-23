@@ -162,7 +162,9 @@ func (c *Client) socksDoConnect(conn net.Conn, br *bufio.Reader, host string, po
 	target := net.JoinHostPort(host, strconv.Itoa(int(port)))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	started := time.Now()
 	up, err := c.dial(ctx, "tcp", target)
+	c.reportSOCKSDial(target, err, time.Since(started))
 	if err != nil {
 		writeSocksStatus(conn, 0x05)
 		return
@@ -345,4 +347,12 @@ func closeWrite(c net.Conn) {
 	if cw, ok := c.(interface{ CloseWrite() error }); ok {
 		_ = cw.CloseWrite()
 	}
+}
+
+// reportSOCKSDial hands one connection to the host's hook, if it set one.
+func (c *Client) reportSOCKSDial(target string, err error, took time.Duration) {
+	if c.cfg.OnSOCKSDial == nil {
+		return
+	}
+	c.cfg.OnSOCKSDial(target, err, took)
 }
