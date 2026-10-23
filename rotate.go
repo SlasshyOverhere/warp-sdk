@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/netip"
+	"time"
 )
 
 const (
@@ -17,6 +18,10 @@ const (
 	recentEgressWindow = 5
 	// recentEndpointWindow avoids walking back onto the same ingress.
 	recentEndpointWindow = 8
+	// rotationBudget bounds the whole endpoint walk. Probing one endpoint costs
+	// a handshake plus a trace; an unbounded walk over a 64-endpoint pool stalls
+	// the caller for minutes, which is worse than reporting failure.
+	rotationBudget = 10 * time.Second
 )
 
 // Rotate finds a new egress address by moving to another handshake-verified
@@ -44,12 +49,24 @@ func (c *Client) Rotate(ctx context.Context) (old, next netip.Addr, err error) {
 		return old, old, fmt.Errorf("%w: only %d distinct endpoints verified", ErrNoNewEgress, len(eps))
 	}
 	cur := c.Stats().Endpoint
+	deadline := time.Now().Add(rotationBudget)
 	for _, ep := range c.rotationOrder(eps, cur) {
-		if err := c.SetEndpoint(ep); err != nil {
+		remaining := time.Until(deadline)
+		if remaining <= 0 || ctx.Err() != nil {
+			break
+		}
+		epCtx, cancel := context.WithTimeout(ctx, remaining)
+		err := c.setEndpoint(epCtx, ep)
+		if err != nil {
+			// Park failed ingresses at the back of the walk on later rotations.
+			c.noteEndpointEgress(ep.AddrPort, netip.Addr{})
+			cancel()
 			continue
 		}
-		ip, err := c.rotationEgress(ctx)
+		ip, err := c.rotationEgress(epCtx)
+		cancel()
 		if err != nil {
+			c.noteEndpointEgress(ep.AddrPort, netip.Addr{})
 			continue
 		}
 		c.noteEndpointEgress(ep.AddrPort, ip)

@@ -445,8 +445,15 @@ func traceEgressOnce(ctx context.Context, hc *http.Client, family int) (netip.Ad
 	return netip.Addr{}, fmt.Errorf("warp: no ip= in trace response")
 }
 
-// SetEndpoint moves the tunnel to ep and waits for a handshake.
+// SetEndpoint moves the tunnel to ep and waits for a handshake. The walk inside
+// Rotate uses the ctx-taking variant so it can be bounded by its budget.
 func (c *Client) SetEndpoint(ep Endpoint) error {
+	ctx, cancel := context.WithTimeout(context.Background(), endpointHandshake+5*time.Second)
+	defer cancel()
+	return c.setEndpoint(ctx, ep)
+}
+
+func (c *Client) setEndpoint(ctx context.Context, ep Endpoint) error {
 	ap := ep.AddrPort
 	if ap.Port() == 0 {
 		ap = netip.AddrPortFrom(ap.Addr(), 2408)
@@ -456,8 +463,6 @@ func (c *Client) SetEndpoint(ep Endpoint) error {
 		return errNotStarted
 	}
 	defer release()
-	ctx, cancel := context.WithTimeout(context.Background(), endpointHandshake+5*time.Second)
-	defer cancel()
 	if err := t.setEndpoint(ctx, ap); err != nil {
 		return err
 	}

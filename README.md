@@ -62,7 +62,11 @@ from a random starting point, not just the nearest pair:
 - the last 8 endpoints are avoided, and each rotation starts at a random offset,
   so consecutive rotations do not walk back onto the same ingress;
 - a verified pool smaller than 3 distinct endpoints is refused with
-  `ErrNoNewEgress` instead of reporting a ping-pong cycle as rotation.
+  `ErrNoNewEgress` instead of reporting a ping-pong cycle as rotation;
+- the whole walk is bounded by `rotationBudget` (10s). Each candidate gets only
+  the time left, so a slow handshake is cut instead of running to its own 8s
+  timeout; budget expiry returns `ErrNoNewEgress`. Ingresses that failed a
+  handshake or trace are parked at the back of later walks.
 
 `rotation_table.txt` is written by the live self-check (20 runs, random start,
 recent-exit window). It ends with the distinct-address count and the sequence
