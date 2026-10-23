@@ -1,0 +1,21 @@
+#   axis      old IP                       new IP                       changed  elapsed
+1   endpoint  2a09:bac1:36c0:268::31:15f   2a09:bac5:3bf4:2c5a::46b:3a  true     1.618s
+2   endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.545s
+3   endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.491s
+4   endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.509s
+5   endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.481s
+6   endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.499s
+7   endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.487s
+8   endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.512s
+9   endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.657s
+10  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.507s
+11  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.639s
+12  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.677s
+13  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.498s
+14  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.664s
+15  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.645s
+16  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.671s
+17  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.656s
+18  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.503s
+19  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.64s
+20  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.677s
