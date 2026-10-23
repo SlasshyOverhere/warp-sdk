@@ -198,6 +198,15 @@ func (t *tunnel) rehandshake(ctx context.Context) error {
 	if peer == nil {
 		return errors.New("warp: peer not configured")
 	}
+	// Re-apply the endpoint as well as expiring the keypair: the ingress may have
+	// dropped the session entirely, in which case a fresh keypair alone still
+	// leaves the device dialling a route nobody answers on. Same UAPI shape as
+	// setEndpoint, which is the only other place that writes an endpoint.
+	if ep, ok := t.ep.Load().(netip.AddrPort); ok && ep.IsValid() {
+		peerHex := make([]byte, 32)
+		copy(peerHex, t.peerKey[:])
+		_ = t.dev.IpcSet(fmt.Sprintf("public_key=%x\nendpoint=%s\n", peerHex, ep))
+	}
 	peer.ExpireCurrentKeypairs()
 	_, err := t.waitHandshake(ctx, 0, endpointHandshake)
 	return err
