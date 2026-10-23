@@ -186,6 +186,23 @@ func (t *tunnel) setEndpoint(ctx context.Context, ep netip.AddrPort) error {
 	return nil
 }
 
+// rehandshake forces a brand-new handshake with the current endpoint. An ingress
+// move can leave the keypair nominally valid while the data path is dead (the
+// peer accepted the handshake but stops forwarding). Re-dialling TCP does not
+// clear that -- only a fresh keypair does. It is cheap (~200ms) and is what turns
+// a 15s stall into a couple of seconds.
+func (t *tunnel) rehandshake(ctx context.Context) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	peer := t.dev.LookupPeer(t.peerKey)
+	if peer == nil {
+		return errors.New("warp: peer not configured")
+	}
+	peer.ExpireCurrentKeypairs()
+	_, err := t.waitHandshake(ctx, 0, endpointHandshake)
+	return err
+}
+
 func (t *tunnel) waitHandshake(ctx context.Context, baseline int64, timeout time.Duration) (time.Duration, error) {
 	peer := t.dev.LookupPeer(t.peerKey)
 	if peer == nil {

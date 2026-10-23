@@ -33,6 +33,17 @@ const (
 	traceURL     = "https://www.cloudflare.com/cdn-cgi/trace"
 	drainTimeout = 10 * time.Second
 	scanBudget   = 20 * time.Second
+
+	// traceTimeout bounds ONE egress-trace round trip. A healthy WARP trace
+	// answers in well under a second; anything slower is a stalled SYN after an
+	// endpoint change, where netstack retransmits on a 1s/2s/4s/8s backoff. The
+	// old 20s cap let a single stalled attempt own the whole rotation, which is
+	// what made rotations occasionally take 20-40s through the proxy. Short
+	// attempts plus a re-dial recover in about a second.
+	traceTimeout = 1800 * time.Millisecond
+	// traceAttempts is how many short attempts one lookup may make before the
+	// egress is declared unknown. Bounded by the caller's ctx as well.
+	traceAttempts = 5
 )
 
 // Stats is a snapshot of client state. EndpointRotations counts rotations that
@@ -378,6 +389,10 @@ func (c *Client) egressIP(ctx context.Context, family int) (netip.Addr, error) {
 
 // egressIPVia is the tunnel-level implementation, reusable by tests and by
 // future rotation axes that do not go through the Client.
+//
+// It re-handshakes between attempts. A stalled data path after an ingress move
+// keeps answering "keypair valid" while dropping every packet, so retrying the
+// HTTP request alone just burns the budget on a dead tunnel.
 func egressIPVia(ctx context.Context, t *tunnel, family int) (netip.Addr, error) {
 	tr := &http.Transport{
 		DialContext: func(dctx context.Context, network, addr string) (net.Conn, error) {
@@ -388,21 +403,28 @@ func egressIPVia(ctx context.Context, t *tunnel, family int) (netip.Addr, error)
 		},
 		ForceAttemptHTTP2: false,
 	}
-	hc := &http.Client{Transport: tr, Timeout: 20 * time.Second}
+	hc := &http.Client{Transport: tr, Timeout: traceTimeout}
 	defer tr.CloseIdleConnections()
-	// A handshake rekey can truncate the first trace request; retry transient
-	// transport errors before declaring the egress unknown.
+	// A handshake rekey can truncate the first trace request, and a stalled SYN
+	// can sit for seconds before the tunnel notices. Retry with a short cap
+	// rather than letting one attempt consume the caller's whole budget.
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < traceAttempts; attempt++ {
 		ip, err := traceEgressOnce(ctx, hc, family)
 		if err == nil {
 			return ip, nil
 		}
 		lastErr = err
+		// Any failed attempt may be a dead path rather than a slow one: a moved
+		// ingress can keep reporting a valid keypair while dropping every packet.
+		// A fresh handshake is ~200ms and is what turns a 15s stall into seconds.
+		hctx, hcancel := context.WithTimeout(ctx, endpointHandshake)
+		_ = t.rehandshake(hctx)
+		hcancel()
 		select {
 		case <-ctx.Done():
 			return netip.Addr{}, ctx.Err()
-		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
+		case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
 		}
 	}
 	return netip.Addr{}, lastErr
