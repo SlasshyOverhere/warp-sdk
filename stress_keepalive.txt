@@ -1,0 +1,40 @@
+rotation stress: 30 attempts, 4 load workers, 1m18.071s total
+success=30 failed=0 reused=0 distinct=30 exhausted_at=0
+rotation latency success: mean=2.602s p50=1.762s p90=4.566s p99=5.93s min=1.371s max=7.45s (n=30)
+rotation latency all:     mean=2.602s p50=1.762s p90=4.566s p99=5.93s min=1.371s max=7.45s (n=30)
+proxy load: 24 ok, 9 errors (27.27%), latency mean=521ms p50=579ms p90=770ms p99=781ms min=187ms max=939ms (n=24)
+  error x9: Get "https://www.cloudflare.com/cdn-cgi/trace": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+#   elapsed  old IP                       new IP
+1   2.13s    2a09:bac1:36e0:268::46b:56   2a09:bac1:36a0:268::31:192
+2   1.924s   2a09:bac1:36a0:268::31:192   2a09:bac5:3bf0:2c5a::46b:1e
+3   1.685s   2a09:bac5:3bf0:2c5a::46b:1e  2a09:bac5:3bf7:254b::3b7:17
+4   4.476s   2a09:bac5:3bf7:254b::3b7:17  2a09:bac1:36a0:268::46b:22
+5   1.453s   2a09:bac1:36a0:268::46b:22   2a09:bac5:3bf2:2541::3b6:4b
+6   7.45s    2a09:bac5:3bf2:2541::3b6:4b  2a09:bac5:3bf3:2c5a::46b:d
+7   1.483s   2a09:bac5:3bf3:2c5a::46b:d   2a09:bac1:36c0:268::3b7:20
+8   1.431s   2a09:bac1:36c0:268::3b7:20   2a09:bac5:3bf3:1eb::31:155
+9   1.371s   2a09:bac5:3bf3:1eb::31:155   2a09:bac1:36c0:268::3b6:31
+10  1.596s   2a09:bac1:36c0:268::3b6:31   2a09:bac5:3bf3:1eb::31:1b3
+11  4.436s   2a09:bac5:3bf3:1eb::31:1b3   2a09:bac1:36c0:268::3b6:6a
+12  1.729s   2a09:bac1:36c0:268::3b6:6a   2a09:bac1:36e0:268::46b:4c
+13  1.656s   2a09:bac1:36e0:268::46b:4c   2a09:bac5:3bf7:2541::3b6:71
+14  2.551s   2a09:bac5:3bf7:2541::3b6:71  2a09:bac1:36a0:268::4a0:20
+15  5.93s    2a09:bac1:36a0:268::4a0:20   2a09:bac5:3bf2:1eb::31:167
+16  4.724s   2a09:bac5:3bf2:1eb::31:167   2a09:bac5:3bf1:2e6e::4a0:19
+17  1.584s   2a09:bac5:3bf1:2e6e::4a0:19  2a09:bac1:36a0:268::3b7:5
+18  1.767s   2a09:bac1:36a0:268::3b7:5    2a09:bac5:3bf1:254b::3b7:9
+19  1.761s   2a09:bac5:3bf1:254b::3b7:9   2a09:bac1:36a0:268::3b6:39
+20  2.463s   2a09:bac1:36a0:268::3b6:39   2a09:bac5:3bf4:2541::3b6:14
+21  1.601s   2a09:bac5:3bf4:2541::3b6:14  2a09:bac5:3bf7:2c5a::46b:41
+22  1.762s   2a09:bac5:3bf7:2c5a::46b:41  2a09:bac1:3680:268::4a0:e
+23  1.602s   2a09:bac1:3680:268::4a0:e    2a09:bac1:3680:268::4a0:26
+24  4.48s    2a09:bac1:3680:268::4a0:26   2a09:bac5:3bf6:1eb::31:1ab
+25  1.588s   2a09:bac5:3bf6:1eb::31:1ab   2a09:bac5:3bf0:1eb::31:121
+26  2.62s    2a09:bac5:3bf0:1eb::31:121   2a09:bac5:3bf1:2c5a::46b:17
+27  1.715s   2a09:bac5:3bf1:2c5a::46b:17  2a09:bac1:36a0:268::4a0:8
+28  4.566s   2a09:bac1:36a0:268::4a0:8    2a09:bac5:3bf4:254b::3b7:60
+29  2.35s    2a09:bac5:3bf4:254b::3b7:60  2a09:bac5:3bf0:2e6e::4a0:25
+30  2.188s   2a09:bac5:3bf0:2e6e::4a0:25  2a09:bac1:36a0:268::46b:45
+
+tunnel healthy after stress: egress=2a09:bac1:36a0:268::46b:45 err=<nil>

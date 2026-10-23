@@ -142,6 +142,13 @@ pins one. `TestLiveSelfCheck/tls_dialers` exercises both.
   WARP+ needs `Config.License`.
 - Endpoint discovery probes Cloudflare with handshakes. Keep the default budget
   and don't run it in a tight loop.
+- **Continuous rotation disturbs live proxied traffic.** Every rejected candidate
+  moves the tunnel and expires the current keypair, so under back-to-back
+  rotations new and in-flight proxy requests can stall; the stress reports show
+  7–27% timeouts at 4 concurrent request loops (errors are client timeouts, the
+  tunnel itself stays healthy). Rotate with a pause in between, or treat a
+  rotation as a brief maintenance window, until candidate probing is isolated
+  from the live tunnel.
 
 ## Verification
 
@@ -154,6 +161,17 @@ The live test registers an account, asserts the egress IP differs from the
 host's direct IP, checks `warp=on` through SOCKS5 and HTTP, runs 20 rotations
 and prints/writes the table, then asserts the proxy refuses connections after
 `Stop`.
+
+Rotation stress / benchmark (latency percentiles + concurrent proxy load):
+
+```sh
+WARP_LIVE=1 go test -run TestLiveRotationStress -v -timeout 30m
+# env: WARP_STRESS_N=30  WARP_STRESS_LOAD=4  WARP_STRESS_KEEPALIVE=1
+#      WARP_STRESS_REPORT=stress_report.txt
+```
+
+Reports are written to `stress_report.txt` (or `WARP_STRESS_REPORT`), including
+`stress_idle.txt` and `stress_keepalive.txt` in this repo.
 
 ## Module path
 
