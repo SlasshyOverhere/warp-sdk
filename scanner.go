@@ -59,6 +59,7 @@ func (c *Client) Endpoints(ctx context.Context) ([]Endpoint, error) {
 	if err != nil {
 		return nil, err
 	}
+	eps = dedupeEndpoints(eps)
 	c.scanEP = append([]Endpoint(nil), eps...)
 	c.scanAt = time.Now()
 	return eps, nil
@@ -138,13 +139,19 @@ func scanTargets(ctx context.Context, override []string) ([]netip.AddrPort, erro
 			add(netip.AddrPortFrom(ip, scanPort))
 		}
 	}
+	// Interleave the ranges so an early-exit scan samples every CIDR instead of
+	// exhausting the first /24. That keeps the verified pool diverse, which is
+	// what endpoint rotation depends on.
+	bases := make([][4]byte, 0, len(warpCIDRs))
 	for _, cidr := range warpCIDRs {
 		p, err := netip.ParsePrefix(cidr)
 		if err != nil {
 			continue
 		}
-		base := p.Masked().Addr().As4()
-		for i := 1; i < 255; i++ {
+		bases = append(bases, p.Masked().Addr().As4())
+	}
+	for i := 1; i < 255; i++ {
+		for _, base := range bases {
 			base[3] = byte(i)
 			add(netip.AddrPortFrom(netip.AddrFrom4(base), scanPort))
 		}

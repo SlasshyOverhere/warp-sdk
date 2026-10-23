@@ -112,6 +112,33 @@ func (t *tunnel) dial(ctx context.Context, network, addr string) (net.Conn, erro
 	}
 }
 
+// dialFamily dials addr over the tunnel, restricted to one IP family.
+func (t *tunnel) dialFamily(ctx context.Context, addr string, family int) (net.Conn, error) {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.ParseUint(portStr, 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("warp: bad port in %q: %w", addr, err)
+	}
+	addrs, err := t.lookupHost(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range addrs {
+		ip = ip.Unmap()
+		if family == 4 && !ip.Is4() {
+			continue
+		}
+		if family == 6 && !ip.Is6() {
+			continue
+		}
+		return t.net.DialContextTCPAddrPort(ctx, netip.AddrPortFrom(ip, uint16(port)))
+	}
+	return nil, fmt.Errorf("warp: no IPv%d address for %s", family, host)
+}
+
 // lookupHost resolves host through the tunnel's DNS (1.1.1.1/1.0.0.1).
 func (t *tunnel) lookupHost(ctx context.Context, host string) ([]netip.Addr, error) {
 	if ip, err := netip.ParseAddr(host); err == nil {

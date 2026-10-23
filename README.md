@@ -44,21 +44,34 @@ you set `Config.SOCKS`). The HTTP proxy is enabled by setting `Config.HTTP`.
    ranked by handshake RTT. Concurrency-capped (128), 20s default budget,
    results cached for five minutes.
 5. **Rotation.** `Rotate` moves to a different handshake-verified endpoint,
-   forces a re-handshake and re-checks `EgressIP`. Tunnels are refcounted, so
-   in-flight proxied connections survive both endpoint moves and shutdown
-   drains.
+   forces a re-handshake and re-checks the egress address. Tunnels are
+   refcounted, so in-flight proxied connections survive both endpoint moves and
+   shutdown drains.
 
-## Rotation axes — evidence
+## Rotation
 
-`Rotate` walks the ranked endpoint list and returns the first endpoint whose
-egress IP differs from the old one. In the 20-run live check the endpoint axis
-succeeded **20/20 times**, so the expensive "deregister + register a fresh
-identity" axis was deleted instead of kept as dead weight. The identity API
-calls remain public (`Register`, `Identity.Delete`, ...); a future provider that
-blocks endpoint hopping can reintroduce an identity axis in `Rotate`.
+`Rotate` rotates the family the upstream actually observes (IPv6 when
+dual-stack, falling back to any). It visits the **full verified endpoint pool**
+from a random starting point, not just the nearest pair:
 
-`rotation_table.txt` is written by the live self-check with columns: run, axis,
-old IP, new IP, changed, elapsed.
+- endpoints are deduped by `ip:port`;
+- unseen endpoints are preferred, then endpoints whose last observed exit is not
+  recent, then recently used ones as a last resort;
+- the last 5 exits (`Stats.RecentEgress`) are refused, so a new address is never
+  reported if it was used within the last 5 rotations;
+- the last 8 endpoints are avoided, and each rotation starts at a random offset,
+  so consecutive rotations do not walk back onto the same ingress;
+- a verified pool smaller than 3 distinct endpoints is refused with
+  `ErrNoNewEgress` instead of reporting a ping-pong cycle as rotation.
+
+`rotation_table.txt` is written by the live self-check (20 runs, random start,
+recent-exit window). It ends with the distinct-address count and the sequence
+cycle length, then a measured IPv4 pinning section: five endpoint swaps and five
+fresh `Register` calls. In that measurement every IPv4 row was the same address,
+which is why there is no identity axis — a second axis cannot move pinned IPv4.
+IPv6 rotation, which is what the upstream observes, is handled by endpoints.
+
+The identity API calls remain public (`Register`, `Identity.Delete`, ...).
 
 ## API
 
@@ -79,7 +92,9 @@ func (c *Client) SOCKSAddr() netip.AddrPort
 func (c *Client) HTTPAddr() netip.AddrPort
 func (c *Client) Start(ctx context.Context) error // blocks until ctx done or Stop
 func (c *Client) Stop() error
-func (c *Client) EgressIP(ctx context.Context) (netip.Addr, error)
+func (c *Client) EgressIP(ctx context.Context) (netip.Addr, error)   // any / dual-stack
+func (c *Client) EgressIP4(ctx context.Context) (netip.Addr, error)  // force IPv4
+func (c *Client) EgressIP6(ctx context.Context) (netip.Addr, error)  // force IPv6
 func (c *Client) Endpoints(ctx context.Context) ([]Endpoint, error)
 func (c *Client) SetEndpoint(ep Endpoint) error
 func (c *Client) Rotate(ctx context.Context) (old, new netip.Addr, err error)
@@ -89,8 +104,13 @@ func (c *Client) Stats() Stats
 `NewClient` binds the proxy listeners immediately, so `SOCKSAddr()` is valid
 before `Start`. `Start` performs the network work.
 
-`Stats` reports the active endpoint, uptime, active connections, tx/rx bytes
-and the rotation counts (endpoint successes vs failures).
+`EgressIP` keeps the original any-family behaviour; `EgressIP4`/`EgressIP6`
+force a family (the trace host is resolved through netstack, then dialed on that
+family; a mismatched trace answer is an error).
+
+`Stats` reports the active endpoint, uptime, active connections, tx/rx bytes,
+rotation counts (endpoint successes vs failures) and the bounded
+`RecentEgress` window.
 
 ## TLS fingerprint
 

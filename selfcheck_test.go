@@ -168,14 +168,94 @@ func TestLiveSelfCheck(t *testing.T) {
 			}
 		}
 		w.Flush()
+
+		seq := make([]string, 0, len(rows))
+		distinct := make(map[string]struct{})
+		for _, r := range rows {
+			seq = append(seq, r.new)
+			if r.changed {
+				distinct[r.new] = struct{}{}
+			}
+		}
+		period := cycleLength(seq)
+		cycle := "none (no shorter repeat within the run)"
+		if period < len(seq) {
+			cycle = fmt.Sprintf("%d", period)
+		}
+		fmt.Fprintf(&sb, "\ndistinct addresses: %d of %d runs\n", len(distinct), len(rows))
+		fmt.Fprintf(&sb, "cycle length: %s\n", cycle)
 		if err := os.WriteFile("rotation_table.txt", []byte(sb.String()), 0o644); err != nil {
 			t.Logf("write rotation table: %v", err)
 		}
 		t.Logf("rotation results:\n%s", sb.String())
-		t.Logf("endpoint axis=%d identity axis=%d failed=%d", epOK, idOK, failed)
+		t.Logf("endpoint axis=%d identity axis=%d failed=%d distinct=%d cycle=%s", epOK, idOK, failed, len(distinct), cycle)
 		if epOK+idOK == 0 {
 			t.Fatal("all 20 rotations failed to produce a new egress IP")
 		}
+		if len(distinct) < 6 {
+			t.Fatalf("only %d distinct egress addresses in 20 rotations, want >= 6", len(distinct))
+		}
+	})
+
+	// 4b. Record what the IPv4 egress does on both axes, so comments cite data
+	// that actually exists in rotation_table.txt.
+	t.Run("ipv4_pinning", func(t *testing.T) {
+		var sb strings.Builder
+		fmt.Fprintln(&sb, "\n# IPv4 pinning — endpoint axis (SetEndpoint then EgressIP4)")
+		eps, err := c.Endpoints(ctx)
+		if err != nil {
+			t.Fatalf("endpoints: %v", err)
+		}
+		cur := c.Stats().Endpoint
+		n := 0
+		for _, ep := range eps {
+			if ep.AddrPort == cur {
+				continue
+			}
+			if err := c.SetEndpoint(ep); err != nil {
+				continue
+			}
+			ip, err := c.EgressIP4(ctx)
+			if err != nil {
+				continue
+			}
+			n++
+			fmt.Fprintf(&sb, "endpoint\t%d\t%s\n", n, ip)
+			if n == 5 {
+				break
+			}
+		}
+		fmt.Fprintln(&sb, "\n# IPv4 pinning — identity axis (fresh Register + fresh tunnel each row)")
+		for i := 1; i <= 5; i++ {
+			fresh, err := Register(ctx)
+			if err != nil {
+				t.Fatalf("register #%d: %v", i, err)
+			}
+			ep, err := resolveEndpoint(ctx, fresh.Endpoint)
+			if err != nil {
+				t.Fatalf("resolve #%d: %v", i, err)
+			}
+			tun, err := newTunnel(ctx, fresh, ep, 1280)
+			if err != nil {
+				t.Fatalf("tunnel #%d: %v", i, err)
+			}
+			ip, err := egressIPVia(ctx, tun, 4)
+			tun.close()
+			_ = fresh.Delete(ctx)
+			if err != nil {
+				t.Fatalf("ipv4 egress #%d: %v", i, err)
+			}
+			fmt.Fprintf(&sb, "identity\t%d\t%s\n", i, ip)
+		}
+		f, err := os.OpenFile("rotation_table.txt", os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatalf("open rotation table: %v", err)
+		}
+		defer f.Close()
+		if _, err := f.WriteString(sb.String()); err != nil {
+			t.Fatalf("append rotation table: %v", err)
+		}
+		t.Logf("ipv4 pinning:\n%s", sb.String())
 	})
 
 	// 5. Stop and prove the proxy is dead rather than leaking direct.
@@ -197,6 +277,24 @@ func TestLiveSelfCheck(t *testing.T) {
 		t.Fatalf("proxy still accepting on %s after Stop", socks)
 	}
 	t.Logf("proxy refused after stop: %v", err)
+}
+
+// cycleLength is the shortest period p such that seq[i] == seq[i%p]; len(seq)
+// means the run never settles into a shorter cycle.
+func cycleLength(seq []string) int {
+	for p := 1; p <= len(seq); p++ {
+		ok := true
+		for i := range seq {
+			if seq[i] != seq[i%p] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return p
+		}
+	}
+	return len(seq)
 }
 
 func hostEgressIP(t *testing.T) netip.Addr {

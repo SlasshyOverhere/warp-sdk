@@ -1,21 +1,38 @@
 #   axis      old IP                       new IP                       changed  elapsed
-1   endpoint  2a09:bac1:36c0:268::31:15f   2a09:bac5:3bf4:2c5a::46b:3a  true     1.618s
-2   endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.545s
-3   endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.491s
-4   endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.509s
-5   endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.481s
-6   endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.499s
-7   endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.487s
-8   endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.512s
-9   endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.657s
-10  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.507s
-11  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.639s
-12  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.677s
-13  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.498s
-14  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.664s
-15  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.645s
-16  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.671s
-17  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.656s
-18  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.503s
-19  endpoint  2a09:bac5:3bf4:2e6e::4a0:4   2a09:bac5:3bf4:2c5a::46b:3a  true     1.64s
-20  endpoint  2a09:bac5:3bf4:2c5a::46b:3a  2a09:bac5:3bf4:2e6e::4a0:4   true     1.677s
+1   endpoint  2a09:bac1:36e0:268::3b7:6d   2a09:bac5:3bf2:2541::3b6:69  true     1.768s
+2   endpoint  2a09:bac5:3bf2:2541::3b6:69  2a09:bac1:36e0:268::3b7:6d   true     1.456s
+3   endpoint  2a09:bac1:36e0:268::3b7:6d   2a09:bac1:36a0:268::46b:c    true     1.861s
+4   endpoint  2a09:bac1:36a0:268::46b:c    2a09:bac5:3bf0:2e6e::4a0:1c  true     9.819s
+5   endpoint  2a09:bac5:3bf0:2e6e::4a0:1c  2a09:bac5:3bf3:254b::3b7:1e  true     9.986s
+6   endpoint  2a09:bac5:3bf3:254b::3b7:1e  2a09:bac5:3bf3:254b::3b7:11  true     1.61s
+7   endpoint  2a09:bac5:3bf3:254b::3b7:11  2a09:bac5:3bf7:2541::3b6:b   true     1.582s
+8   endpoint  2a09:bac5:3bf7:2541::3b6:b   2a09:bac1:36e0:268::3b6:41   true     1.693s
+9   endpoint  2a09:bac1:36e0:268::3b6:41   2a09:bac1:36e0:268::3b7:6d   true     1.464s
+10  endpoint  2a09:bac1:36e0:268::3b7:6d   2a09:bac5:3bf6:254b::3b7:2   true     1.673s
+11  endpoint  2a09:bac5:3bf6:254b::3b7:2   2a09:bac5:3bf1:2541::3b6:63  true     1.799s
+12  endpoint  2a09:bac5:3bf1:2541::3b6:63  2a09:bac5:3bf6:2e6e::4a0:22  true     1.869s
+13  endpoint  2a09:bac5:3bf6:2e6e::4a0:22  2a09:bac5:3bf4:2e6e::4a0:23  true     9.65s
+14  endpoint  2a09:bac5:3bf4:2e6e::4a0:23  2a09:bac1:36a0:268::46b:c    true     8.716s
+15  endpoint  2a09:bac1:36a0:268::46b:c    2a09:bac1:3680:268::31:122   true     1.401s
+16  endpoint  2a09:bac1:3680:268::31:122   2a09:bac5:3bf6:2e6e::4a0:4   true     1.72s
+17  endpoint  2a09:bac5:3bf6:2e6e::4a0:4   2a09:bac1:36a0:268::46b:5f   true     1.697s
+18  endpoint  2a09:bac1:36a0:268::46b:5f   2a09:bac5:3bf3:2c5a::46b:32  true     1.574s
+19  endpoint  2a09:bac5:3bf3:2c5a::46b:32  2a09:bac1:3680:268::31:1aa   true     1.598s
+20  endpoint  2a09:bac1:3680:268::31:1aa   2a09:bac1:36a0:268::4a0:2    true     40.838s
+
+distinct addresses: 18 of 20 runs
+cycle length: none (no shorter repeat within the run)
+
+# IPv4 pinning — endpoint axis (SetEndpoint then EgressIP4)
+endpoint	1	104.28.216.196
+endpoint	2	104.28.216.196
+endpoint	3	104.28.216.196
+endpoint	4	104.28.216.196
+endpoint	5	104.28.216.196
+
+# IPv4 pinning — identity axis (fresh Register + fresh tunnel each row)
+identity	1	104.28.216.196
+identity	2	104.28.216.196
+identity	3	104.28.216.196
+identity	4	104.28.216.196
+identity	5	104.28.216.196

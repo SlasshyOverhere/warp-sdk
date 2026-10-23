@@ -35,8 +35,9 @@ const (
 	scanBudget   = 20 * time.Second
 )
 
-// Stats is a snapshot of client state. EndpointRotations and IdentityRotations
-// are the axes that actually produced a new egress IP.
+// Stats is a snapshot of client state. EndpointRotations counts rotations that
+// produced a new egress IP; RecentEgress is the bounded set of addresses the
+// last few rotations landed on.
 type Stats struct {
 	Endpoint          netip.AddrPort
 	Uptime            time.Duration
@@ -46,6 +47,7 @@ type Stats struct {
 	LastRotateAxis    string
 	EndpointRotations uint64
 	FailedRotations   uint64
+	RecentEgress      []netip.Addr
 }
 
 // Client owns the identity and the tunnels. It is safe for concurrent use.
@@ -82,6 +84,14 @@ type Client struct {
 	lastAxis  atomic.Value // string
 	epRot     atomic.Uint64
 	failRot   atomic.Uint64
+
+	// recentMu guards the bounded rotation memory. epEgress is a hint cache:
+	// endpoint -> last egress seen from it, so Rotate can prefer endpoints it
+	// has not already proven to land on a recent address.
+	recentMu     sync.Mutex
+	recentEgress []netip.Addr
+	recentEP     []netip.AddrPort
+	epEgress     map[netip.AddrPort]netip.Addr
 }
 
 // NewClient binds the local proxy listeners and prepares the data directory.
@@ -337,19 +347,65 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-// EgressIP returns the public IP the tunnel exits from.
+// EgressIP returns the public IP the tunnel exits from, in whichever family the
+// trace host resolves to through netstack (in practice IPv6). Use EgressIP4 or
+// EgressIP6 when the family matters.
 func (c *Client) EgressIP(ctx context.Context) (netip.Addr, error) {
+	return c.egressIP(ctx, 0)
+}
+
+// EgressIP4 returns the IPv4 address WARP exits from.
+func (c *Client) EgressIP4(ctx context.Context) (netip.Addr, error) {
+	return c.egressIP(ctx, 4)
+}
+
+// EgressIP6 returns the IPv6 address WARP exits from.
+func (c *Client) EgressIP6(ctx context.Context) (netip.Addr, error) {
+	return c.egressIP(ctx, 6)
+}
+
+func (c *Client) egressIP(ctx context.Context, family int) (netip.Addr, error) {
 	t, release := c.acquireTunnel()
 	if t == nil {
 		return netip.Addr{}, errNotStarted
 	}
 	defer release()
+	return egressIPVia(ctx, t, family)
+}
+
+// egressIPVia is the tunnel-level implementation, reusable by tests and by
+// future rotation axes that do not go through the Client.
+func egressIPVia(ctx context.Context, t *tunnel, family int) (netip.Addr, error) {
 	tr := &http.Transport{
-		DialContext:       t.dial,
+		DialContext: func(dctx context.Context, network, addr string) (net.Conn, error) {
+			if family == 0 {
+				return t.dial(dctx, network, addr)
+			}
+			return t.dialFamily(dctx, addr, family)
+		},
 		ForceAttemptHTTP2: false,
 	}
 	hc := &http.Client{Transport: tr, Timeout: 20 * time.Second}
 	defer tr.CloseIdleConnections()
+	// A handshake rekey can truncate the first trace request; retry transient
+	// transport errors before declaring the egress unknown.
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		ip, err := traceEgressOnce(ctx, hc, family)
+		if err == nil {
+			return ip, nil
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return netip.Addr{}, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
+		}
+	}
+	return netip.Addr{}, lastErr
+}
+
+func traceEgressOnce(ctx context.Context, hc *http.Client, family int) (netip.Addr, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, traceURL, nil)
 	if err != nil {
 		return netip.Addr{}, err
@@ -365,12 +421,26 @@ func (c *Client) EgressIP(ctx context.Context) (netip.Addr, error) {
 		return netip.Addr{}, fmt.Errorf("warp: egress lookup: %w", err)
 	}
 	for _, line := range strings.Split(string(body), "\n") {
-		if v, ok := strings.CutPrefix(line, "ip="); ok {
-			ip, err := netip.ParseAddr(strings.TrimSpace(v))
-			if err == nil {
-				return ip, nil
+		v, ok := strings.CutPrefix(line, "ip=")
+		if !ok {
+			continue
+		}
+		ip, err := netip.ParseAddr(strings.TrimSpace(v))
+		if err != nil {
+			return netip.Addr{}, fmt.Errorf("warp: bad ip in trace: %w", err)
+		}
+		ip = ip.Unmap()
+		switch family {
+		case 4:
+			if !ip.Is4() {
+				return netip.Addr{}, fmt.Errorf("warp: IPv4 trace egress is %s", ip)
+			}
+		case 6:
+			if !ip.Is6() || ip.Is4() {
+				return netip.Addr{}, fmt.Errorf("warp: IPv6 trace egress is %s", ip)
 			}
 		}
+		return ip, nil
 	}
 	return netip.Addr{}, fmt.Errorf("warp: no ip= in trace response")
 }
@@ -406,6 +476,9 @@ func (c *Client) Stats() Stats {
 		EndpointRotations: c.epRot.Load(),
 		FailedRotations:   c.failRot.Load(),
 	}
+	c.recentMu.Lock()
+	s.RecentEgress = append([]netip.Addr(nil), c.recentEgress...)
+	c.recentMu.Unlock()
 	if ns := c.startedAt.Load(); ns != 0 {
 		s.Uptime = time.Since(time.Unix(0, ns))
 	}
