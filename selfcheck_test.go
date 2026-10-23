@@ -258,6 +258,46 @@ func TestLiveSelfCheck(t *testing.T) {
 		t.Logf("ipv4 pinning:\n%s", sb.String())
 	})
 
+	// 4c. Regression: aborting a setEndpoint mid-handshake must not leave the
+	// reported endpoint and the device disagreeing, and the restore path must
+	// bring the tunnel (and its traffic) back.
+	t.Run("endpoint_abort_consistency", func(t *testing.T) {
+		orig := c.Stats().Endpoint
+		bad := netip.MustParseAddrPort("192.0.2.1:2408") // TEST-NET-1, blackholed
+		bctx, bcancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		start := time.Now()
+		err := c.setEndpoint(bctx, Endpoint{AddrPort: bad})
+		bcancel()
+		if err == nil {
+			t.Fatal("blackholed endpoint unexpectedly completed a handshake")
+		}
+		t.Logf("aborted move to %s after %s: %v", bad, time.Since(start).Round(time.Millisecond), err)
+
+		tun, release := c.acquireTunnel()
+		deviceEP := tun.endpoint()
+		release()
+		if deviceEP != bad {
+			t.Fatalf("device endpoint = %s, want %s", deviceEP, bad)
+		}
+		if got := c.Stats().Endpoint; got != bad {
+			t.Fatalf("Stats endpoint = %s, device endpoint = %s", got, deviceEP)
+		}
+		if err := c.restoreEndpoint(orig); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		tun, release = c.acquireTunnel()
+		deviceEP = tun.endpoint()
+		release()
+		if got := c.Stats().Endpoint; got != orig || deviceEP != orig {
+			t.Fatalf("after restore Stats = %s, device = %s, want %s", got, deviceEP, orig)
+		}
+		ip, err := c.EgressIP6(ctx)
+		if err != nil {
+			t.Fatalf("tunnel does not pass traffic after restore: %v", err)
+		}
+		t.Logf("restored to %s, egress %s", orig, ip)
+	})
+
 	// 5. Stop and prove the proxy is dead rather than leaking direct.
 	if err := c.Stop(); err != nil {
 		t.Fatalf("stop: %v", err)

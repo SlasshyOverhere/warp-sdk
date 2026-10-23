@@ -66,7 +66,10 @@ from a random starting point, not just the nearest pair:
 - the whole walk is bounded by `rotationBudget` (10s). Each candidate gets only
   the time left, so a slow handshake is cut instead of running to its own 8s
   timeout; budget expiry returns `ErrNoNewEgress`. Ingresses that failed a
-  handshake or trace are parked at the back of later walks.
+  handshake or trace are parked at the back of later walks;
+- a failed walk restores the ingress it started from (with its own context,
+  since the caller's is what expired), so `ErrNoNewEgress` means "unchanged",
+  not "possibly pointing at a dead ingress".
 
 `rotation_table.txt` is written by the live self-check (20 runs, random start,
 recent-exit window). It ends with the distinct-address count and the sequence

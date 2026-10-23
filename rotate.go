@@ -79,7 +79,24 @@ func (c *Client) Rotate(ctx context.Context) (old, next netip.Addr, err error) {
 		return old, ip, nil
 	}
 	c.failRot.Add(1)
+	// Every candidate was rejected. Put the tunnel back on the ingress it
+	// started from so a failed rotation leaves the client where it was, not
+	// pointing at an ingress that failed its handshake.
+	if err := c.restoreEndpoint(cur); err != nil {
+		return old, old, fmt.Errorf("%w: restore %s failed: %v", ErrNoNewEgress, cur, err)
+	}
 	return old, old, ErrNoNewEgress
+}
+
+// restoreEndpoint puts the tunnel back on ep if a failed walk left it
+// elsewhere. It uses its own context: the caller's is usually what expired.
+func (c *Client) restoreEndpoint(ep netip.AddrPort) error {
+	if !ep.IsValid() || c.Stats().Endpoint == ep {
+		return nil
+	}
+	rctx, cancel := context.WithTimeout(context.Background(), endpointHandshake+5*time.Second)
+	defer cancel()
+	return c.setEndpoint(rctx, Endpoint{AddrPort: ep})
 }
 
 // rotationEgress prefers IPv6 because netstack (and therefore the upstream)

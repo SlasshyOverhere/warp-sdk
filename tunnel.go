@@ -171,6 +171,9 @@ func (t *tunnel) setEndpoint(ctx context.Context, ep netip.AddrPort) error {
 	if err := t.dev.IpcSet(cfg); err != nil {
 		return fmt.Errorf("warp: set endpoint %s: %w", ep, err)
 	}
+	// Record the move immediately: the device is already pointed at ep, so
+	// reported state must stay true even if the handshake below aborts.
+	t.ep.Store(ep)
 	peer := t.dev.LookupPeer(t.peerKey)
 	if peer == nil {
 		return errors.New("warp: peer vanished")
@@ -180,7 +183,6 @@ func (t *tunnel) setEndpoint(ctx context.Context, ep netip.AddrPort) error {
 	if _, err := t.waitHandshake(ctx, baseline, endpointHandshake); err != nil {
 		return fmt.Errorf("warp: handshake with %s: %w", ep, err)
 	}
-	t.ep.Store(ep)
 	return nil
 }
 

@@ -463,11 +463,11 @@ func (c *Client) setEndpoint(ctx context.Context, ep Endpoint) error {
 		return errNotStarted
 	}
 	defer release()
-	if err := t.setEndpoint(ctx, ap); err != nil {
-		return err
-	}
-	c.endpoint.Store(ap)
-	return nil
+	err := t.setEndpoint(ctx, ap)
+	// The device may have moved even when the handshake failed, so publish the
+	// device's endpoint rather than assuming the attempt left it alone.
+	c.endpoint.Store(t.endpoint())
+	return err
 }
 
 // Stats returns a cheap snapshot; byte counters come from the WireGuard peer.
