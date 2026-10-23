@@ -182,7 +182,22 @@ func TestLiveSelfCheck(t *testing.T) {
 		if period < len(seq) {
 			cycle = fmt.Sprintf("%d", period)
 		}
+		seen := make(map[string]struct{}, len(rows))
+		if len(rows) > 0 {
+			seen[rows[0].old] = struct{}{}
+		}
+		reused := 0
+		for _, r := range rows {
+			if !r.changed {
+				continue
+			}
+			if _, ok := seen[r.new]; ok {
+				reused++
+			}
+			seen[r.new] = struct{}{}
+		}
 		fmt.Fprintf(&sb, "\ndistinct addresses: %d of %d runs\n", len(distinct), len(rows))
+		fmt.Fprintf(&sb, "reused addresses: %d\n", reused)
 		fmt.Fprintf(&sb, "cycle length: %s\n", cycle)
 		if err := os.WriteFile("rotation_table.txt", []byte(sb.String()), 0o644); err != nil {
 			t.Logf("write rotation table: %v", err)
@@ -194,6 +209,9 @@ func TestLiveSelfCheck(t *testing.T) {
 		}
 		if len(distinct) < 6 {
 			t.Fatalf("only %d distinct egress addresses in 20 rotations, want >= 6", len(distinct))
+		}
+		if reused != 0 {
+			t.Fatalf("%d rotations reused a previously used egress address", reused)
 		}
 	})
 

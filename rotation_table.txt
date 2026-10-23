@@ -1,26 +1,27 @@
-#   axis                                  old IP                       new IP                       changed  elapsed
-1   endpoint                              2a09:bac1:3680:268::3b7:c    2a09:bac5:3bf2:2e6e::4a0:6   true     1.934s
-2   failed(warp: no new egress IP found)  2a09:bac5:3bf2:2e6e::4a0:6   2a09:bac5:3bf2:2e6e::4a0:6   false    11.091s
-3   endpoint                              2a09:bac5:3bf2:2e6e::4a0:6   2a09:bac1:36c0:268::3b6:26   true     1.846s
-4   failed(warp: no new egress IP found)  2a09:bac1:36c0:268::3b6:26   2a09:bac1:36c0:268::3b6:26   false    10.958s
-5   endpoint                              2a09:bac1:36c0:268::3b6:26   2a09:bac5:3bf5:2e6e::4a0:f   true     2.129s
-6   endpoint                              2a09:bac5:3bf5:2e6e::4a0:f   2a09:bac1:3680:268::3b7:c    true     1.518s
-7   endpoint                              2a09:bac1:3680:268::3b7:c    2a09:bac5:3bf1:1eb::31:1c3   true     1.709s
-8   failed(warp: no new egress IP found)  2a09:bac5:3bf1:1eb::31:1c3   2a09:bac5:3bf1:1eb::31:1c3   false    10.9s
-9   endpoint                              2a09:bac5:3bf1:1eb::31:1c3   2a09:bac5:3bf0:2541::3b6:37  true     1.698s
-10  endpoint                              2a09:bac5:3bf0:2541::3b6:37  2a09:bac1:3680:268::31:150   true     1.855s
-11  endpoint                              2a09:bac1:3680:268::31:150   2a09:bac5:3bf5:254b::3b7:30  true     1.629s
-12  endpoint                              2a09:bac5:3bf5:254b::3b7:30  2a09:bac1:36c0:268::3b6:26   true     1.579s
-13  endpoint                              2a09:bac1:36c0:268::3b6:26   2a09:bac1:3680:268::31:125   true     1.619s
-14  endpoint                              2a09:bac1:3680:268::31:125   2a09:bac5:3bf3:2c5a::46b:3e  true     1.74s
-15  endpoint                              2a09:bac5:3bf3:2c5a::46b:3e  2a09:bac5:3bf1:254b::3b7:62  true     1.39s
-16  endpoint                              2a09:bac5:3bf1:254b::3b7:62  2a09:bac1:3680:268::3b7:c    true     1.453s
-17  endpoint                              2a09:bac1:3680:268::3b7:c    2a09:bac1:36a0:268::4a0:7    true     3.16s
-18  endpoint                              2a09:bac1:36a0:268::4a0:7    2a09:bac1:3680:268::3b7:16   true     3.511s
-19  endpoint                              2a09:bac1:3680:268::3b7:16   2a09:bac5:3bf4:2c5a::46b:16  true     1.598s
-20  endpoint                              2a09:bac5:3bf4:2c5a::46b:16  2a09:bac5:3bf0:2541::3b6:43  true     1.418s
+#   axis      old IP                       new IP                       changed  elapsed
+1   endpoint  2a09:bac5:3bf4:2e6e::4a0:2   2a09:bac1:36a0:268::46b:43   true     1.834s
+2   endpoint  2a09:bac1:36a0:268::46b:43   2a09:bac5:3bf2:254b::3b7:49  true     1.372s
+3   endpoint  2a09:bac5:3bf2:254b::3b7:49  2a09:bac5:3bf1:2541::3b6:17  true     1.511s
+4   endpoint  2a09:bac5:3bf1:2541::3b6:17  2a09:bac1:36a0:268::31:1b9   true     1.952s
+5   endpoint  2a09:bac1:36a0:268::31:1b9   2a09:bac5:3bf2:1eb::31:140   true     4.519s
+6   endpoint  2a09:bac5:3bf2:1eb::31:140   2a09:bac1:36c0:268::46b:58   true     1.326s
+7   endpoint  2a09:bac1:36c0:268::46b:58   2a09:bac5:3bf4:1eb::31:11f   true     1.304s
+8   endpoint  2a09:bac5:3bf4:1eb::31:11f   2a09:bac1:36c0:268::31:121   true     1.457s
+9   endpoint  2a09:bac1:36c0:268::31:121   2a09:bac1:36a0:268::46b:40   true     1.743s
+10  endpoint  2a09:bac1:36a0:268::46b:40   2a09:bac5:3bf7:254b::3b7:6c  true     1.754s
+11  endpoint  2a09:bac5:3bf7:254b::3b7:6c  2a09:bac5:3bf4:2c5a::46b:45  true     1.393s
+12  endpoint  2a09:bac5:3bf4:2c5a::46b:45  2a09:bac5:3bf2:2e6e::4a0:4   true     1.354s
+13  endpoint  2a09:bac5:3bf2:2e6e::4a0:4   2a09:bac1:3680:268::31:107   true     1.542s
+14  endpoint  2a09:bac1:3680:268::31:107   2a09:bac5:3bf3:254b::3b7:6a  true     1.742s
+15  endpoint  2a09:bac5:3bf3:254b::3b7:6a  2a09:bac5:3bf5:2e6e::4a0:3   true     2.041s
+16  endpoint  2a09:bac5:3bf5:2e6e::4a0:3   2a09:bac5:3bf3:2541::3b6:5c  true     1.485s
+17  endpoint  2a09:bac5:3bf3:2541::3b6:5c  2a09:bac5:3bf2:254b::3b7:22  true     1.651s
+18  endpoint  2a09:bac5:3bf2:254b::3b7:22  2a09:bac1:3680:268::46b:44   true     1.779s
+19  endpoint  2a09:bac1:3680:268::46b:44   2a09:bac1:36c0:268::3b7:66   true     1.905s
+20  endpoint  2a09:bac1:36c0:268::3b7:66   2a09:bac1:36e0:268::31:177   true     1.827s
 
-distinct addresses: 15 of 20 runs
+distinct addresses: 20 of 20 runs
+reused addresses: 0
 cycle length: none (no shorter repeat within the run)
 
 # IPv4 pinning — endpoint axis (SetEndpoint then EgressIP4)

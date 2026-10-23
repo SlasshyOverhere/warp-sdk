@@ -55,25 +55,29 @@ dual-stack, falling back to any). It visits the **full verified endpoint pool**
 from a random starting point, not just the nearest pair:
 
 - endpoints are deduped by `ip:port`;
-- unseen endpoints are preferred, then endpoints whose last observed exit is not
-  recent, then recently used ones as a last resort;
-- the last 5 exits (`Stats.RecentEgress`) are refused, so a new address is never
-  reported if it was used within the last 5 rotations;
+- endpoints cached to an unused exit are tried first, then unseen endpoints,
+  then endpoints known to yield an already-used exit;
+- **every exit this client has ever rotated to is refused** (`Stats.UsedEgress`),
+  so `Rotate` never returns a previously used address; when the pool is exhausted
+  it reports `ErrNoNewEgress` instead of repeating. `Stats.RecentEgress` still
+  shows the last 5 for a quick view;
 - the last 8 endpoints are avoided, and each rotation starts at a random offset,
   so consecutive rotations do not walk back onto the same ingress;
 - a verified pool smaller than 3 distinct endpoints is refused with
   `ErrNoNewEgress` instead of reporting a ping-pong cycle as rotation;
-- the whole walk is bounded by `rotationBudget` (10s). Each candidate gets only
-  the time left, so a slow handshake is cut instead of running to its own 8s
-  timeout; budget expiry returns `ErrNoNewEgress`. Ingresses that failed a
-  handshake or trace are parked at the back of later walks;
+- the whole walk is bounded by `rotationBudget` (10s) and each candidate by
+  `candidateProbeTimeout` (3s), so one dead ingress cannot eat the walk;
+  budget expiry returns `ErrNoNewEgress`. Ingresses that failed a handshake or
+  trace, and endpoints cached to an already-used exit, are parked at the back
+  of later walks;
 - a failed walk restores the ingress it started from (with its own context,
   since the caller's is what expired), so `ErrNoNewEgress` means "unchanged",
   not "possibly pointing at a dead ingress".
 
 `rotation_table.txt` is written by the live self-check (20 runs, random start,
-recent-exit window). It ends with the distinct-address count and the sequence
-cycle length, then a measured IPv4 pinning section: five endpoint swaps and five
+strict lifetime uniqueness). It ends with the distinct-address count, the
+reused-address count (must be 0) and the sequence cycle length, then a measured
+IPv4 pinning section: five endpoint swaps and five
 fresh `Register` calls. In that measurement every IPv4 row was the same address,
 which is why there is no identity axis — a second axis cannot move pinned IPv4.
 IPv6 rotation, which is what the upstream observes, is handled by endpoints.

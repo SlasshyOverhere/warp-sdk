@@ -48,6 +48,7 @@ type Stats struct {
 	EndpointRotations uint64
 	FailedRotations   uint64
 	RecentEgress      []netip.Addr
+	UsedEgress        []netip.Addr
 }
 
 // Client owns the identity and the tunnels. It is safe for concurrent use.
@@ -90,6 +91,8 @@ type Client struct {
 	// has not already proven to land on a recent address.
 	recentMu     sync.Mutex
 	recentEgress []netip.Addr
+	usedEgress   []netip.Addr
+	usedSet      map[netip.Addr]struct{}
 	recentEP     []netip.AddrPort
 	epEgress     map[netip.AddrPort]netip.Addr
 }
@@ -483,6 +486,7 @@ func (c *Client) Stats() Stats {
 	}
 	c.recentMu.Lock()
 	s.RecentEgress = append([]netip.Addr(nil), c.recentEgress...)
+	s.UsedEgress = append([]netip.Addr(nil), c.usedEgress...)
 	c.recentMu.Unlock()
 	if ns := c.startedAt.Load(); ns != 0 {
 		s.Uptime = time.Since(time.Unix(0, ns))
