@@ -7,8 +7,8 @@
 warp-data/
 identity.json
 
-# scratch reports (the committed ones live at the root on purpose)
-stress_*.local.txt
+# scratch live-run reports
+*.local.txt
 
 .opencode/
 .DS_Store

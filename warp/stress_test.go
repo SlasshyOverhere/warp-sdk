@@ -212,7 +212,7 @@ func TestLiveRotationStress(t *testing.T) {
 	t.Logf("\n%s", sb.String())
 	report := os.Getenv("WARP_STRESS_REPORT")
 	if report == "" {
-		report = "../docs/stress_report.txt"
+		report = "stress_report.local.txt"
 	}
 	if err := os.WriteFile(report, []byte(sb.String()), 0o644); err != nil {
 		t.Logf("write stress report: %v", err)
