@@ -1,4 +1,4 @@
-module github.com/warpsdk/warp
+module github.com/SlasshyOverhere/warp-sdk
 
 go 1.26.5
 

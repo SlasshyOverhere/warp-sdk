@@ -1,179 +1,86 @@
-# warpsdk — userspace Cloudflare WARP in Go
+# warp-sdk
 
-A standalone Go module that registers a Cloudflare WARP account, runs WireGuard
-in-process over a gVisor netstack, and exposes local SOCKS5 and HTTP proxies.
+[![Go Reference](https://pkg.go.dev/badge/github.com/SlasshyOverhere/warp-sdk/warp.svg)](https://pkg.go.dev/github.com/SlasshyOverhere/warp-sdk/warp)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-No `warp-cli`, no `warp-svc`, no admin, no TUN device, no cgo, no route table
-edits.
+A userspace Cloudflare WARP client for Go. Registers a WARP account, runs
+WireGuard in-process over a gVisor netstack, and exposes local SOCKS5 and HTTP
+proxies. No TUN device, no admin rights, no cgo, no route table edits.
+
+> **Unofficial.** Not affiliated with, endorsed by, or supported by Cloudflare,
+> Inc. "WARP" and "Cloudflare" are trademarks of Cloudflare, Inc., used here only
+> to describe the service this library talks to. It registers real accounts
+> against Cloudflare's API, so it is subject to Cloudflare's terms and you use it
+> at your own risk.
+
+## Install
+
+```sh
+go get github.com/SlasshyOverhere/warp-sdk/warp
+```
+
+## Usage
 
 ```go
-import warp "github.com/warpsdk/warp"
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
 
 c, err := warp.NewClient(warp.Config{DataDir: "./warp-data"})
 if err != nil {
-	return err
+	log.Fatal(err)
 }
 defer c.Stop()
 
-// Start blocks until ctx is done; it registers (or reloads) the identity,
-// brings the tunnel up and serves the proxies.
-go c.Start(ctx)
+go func() {
+	if err := c.Start(ctx); err != nil {
+		log.Printf("start: %v", err)
+	}
+}()
 
-log.Printf("socks5://%s", c.SOCKSAddr())
-ip, err := c.EgressIP(ctx)
+log.Printf("socks5 on %s", c.SOCKSAddr())
 ```
 
-Point any SOCKS5 client at `c.SOCKSAddr()` (an ephemeral loopback port unless
-you set `Config.SOCKS`). The HTTP proxy is enabled by setting `Config.HTTP`.
+Point any SOCKS5 client at `c.SOCKSAddr()`. The listener is bound by
+`NewClient`, so the address is known before `Start` finishes. Set `Config.HTTP`
+to also serve an HTTP proxy.
 
-## What it does
+`c.EgressIP(ctx)` returns the exit address. `c.Rotate(ctx)` moves to a different
+handshake-verified ingress and re-checks the exit, refusing addresses it already
+used unless `Config.EgressReuseWindow` allows it.
 
-1. **Identity.** `POST /reg` with a locally generated X25519 key, then persist
-   the account document plus private key in `DataDir/identity.json` (0600).
-   `GET /reg/{id}`, `PUT /reg/{id}/account` (license) and `DELETE /reg/{id}` are
-   implemented as `Identity.Get`, `Identity.SetLicense` and `Identity.Delete`.
-2. **Tunnel.** `golang.zx2c4.com/wireguard` `device` over
-   `tun/netstack` (gVisor). Interface addresses/peer key come from the identity;
-   MTU 1280, DNS 1.1.1.1/1.0.0.1, keepalive 25s, all traffic allowed. The
-   resulting netstack dialer is the only egress path.
-3. **Proxies.** SOCKS5 `CONNECT` + `UDP ASSOCIATE` (no auth) and, optionally,
-   HTTP `CONNECT` + absolute-URI forwarding. Everything dials through netstack,
-   so stopping the tunnel kills proxy traffic instead of leaking it direct.
-4. **Endpoint scanner.** Enumerates Cloudflare's WARP CIDRs on port 2408 and
-   performs a real WireGuard handshake against each address, keeping successes
-   ranked by handshake RTT. Concurrency-capped (128), 20s default budget,
-   results cached for five minutes.
-5. **Rotation.** `Rotate` moves to a different handshake-verified endpoint,
-   forces a re-handshake and re-checks the egress address. Tunnels are
-   refcounted, so in-flight proxied connections survive both endpoint moves and
-   shutdown drains.
+## Docs
 
-## Rotation
+Full API reference: [pkg.go.dev](https://pkg.go.dev/github.com/SlasshyOverhere/warp-sdk/warp).
 
-`Rotate` rotates the family the upstream actually observes (IPv6 when
-dual-stack, falling back to any). It visits the **full verified endpoint pool**
-from a random starting point, not just the nearest pair:
+Design rules, timeouts and invariants: [AGENTS.md](AGENTS.md).
 
-- endpoints are deduped by `ip:port`;
-- endpoints cached to an unused exit are tried first, then unseen endpoints,
-  then endpoints known to yield an already-used exit;
-- **every exit this client has ever rotated to is refused** (`Stats.UsedEgress`),
-  so `Rotate` never returns a previously used address; when the pool is exhausted
-  it reports `ErrNoNewEgress` instead of repeating. `Stats.RecentEgress` still
-  shows the last 5 for a quick view;
-- the last 8 endpoints are avoided, and each rotation starts at a random offset,
-  so consecutive rotations do not walk back onto the same ingress;
-- a verified pool smaller than 3 distinct endpoints is refused with
-  `ErrNoNewEgress` instead of reporting a ping-pong cycle as rotation;
-- the whole walk is bounded by `rotationBudget` (10s) and each candidate by
-  `candidateProbeTimeout` (3s), so one dead ingress cannot eat the walk;
-  budget expiry returns `ErrNoNewEgress`. Ingresses that failed a handshake or
-  trace, and endpoints cached to an already-used exit, are parked at the back
-  of later walks;
-- a failed walk restores the ingress it started from (with its own context,
-  since the caller's is what expired), so `ErrNoNewEgress` means "unchanged",
-  not "possibly pointing at a dead ingress".
+## Limitations
 
-`rotation_table.txt` is written by the live self-check (20 runs, random start,
-strict lifetime uniqueness). It ends with the distinct-address count, the
-reused-address count (must be 0) and the sequence cycle length, then a measured
-IPv4 pinning section: five endpoint swaps and five
-fresh `Register` calls. In that measurement every IPv4 row was the same address,
-which is why there is no identity axis — a second axis cannot move pinned IPv4.
-IPv6 rotation, which is what the upstream observes, is handled by endpoints.
-
-The identity API calls remain public (`Register`, `Identity.Delete`, ...).
-
-## API
-
-```go
-type Config struct {
-	DataDir   string
-	Identity  *Identity
-	SOCKS     *netip.AddrPort // nil => 127.0.0.1:0 (ephemeral)
-	HTTP      *netip.AddrPort // nil => disabled
-	Endpoints []string        // initial/override endpoints, e.g. "162.159.192.1:2408"
-	MTU       int             // default 1280
-	License   string          // WARP+ license key, applied via the account API
-	WarpPlus  bool            // documentation only; the license call is the only WARP+ feature
-}
-
-func NewClient(cfg Config) (*Client, error)
-func (c *Client) SOCKSAddr() netip.AddrPort
-func (c *Client) HTTPAddr() netip.AddrPort
-func (c *Client) Start(ctx context.Context) error // blocks until ctx done or Stop
-func (c *Client) Stop() error
-func (c *Client) EgressIP(ctx context.Context) (netip.Addr, error)   // any / dual-stack
-func (c *Client) EgressIP4(ctx context.Context) (netip.Addr, error)  // force IPv4
-func (c *Client) EgressIP6(ctx context.Context) (netip.Addr, error)  // force IPv6
-func (c *Client) Endpoints(ctx context.Context) ([]Endpoint, error)
-func (c *Client) SetEndpoint(ep Endpoint) error
-func (c *Client) Rotate(ctx context.Context) (old, new netip.Addr, err error)
-func (c *Client) Stats() Stats
-```
-
-`NewClient` binds the proxy listeners immediately, so `SOCKSAddr()` is valid
-before `Start`. `Start` performs the network work.
-
-`EgressIP` keeps the original any-family behaviour; `EgressIP4`/`EgressIP6`
-force a family (the trace host is resolved through netstack, then dialed on that
-family; a mismatched trace answer is an error).
-
-`Stats` reports the active endpoint, uptime, active connections, tx/rx bytes,
-rotation counts (endpoint successes vs failures) and the bounded
-`RecentEgress` window.
-
-## TLS fingerprint
-
-The WARP API is called with `crypto/tls` first; if the handshake is rejected it
-retries the same request with a Chrome uTLS fingerprint. `WARP_TLS=std|utls`
-pins one. `TestLiveSelfCheck/tls_dialers` exercises both.
-
-## Limitations / risks
-
-- **WireGuard only, no MASQUE.** Cloudflare is moving its consumer client to
-  MASQUE. If the WireGuard ingress is retired for your account/colo, this
-  library stops working; MASQUE support is deliberately out of scope.
-- **Userspace only.** No TUN, no system routes, no packet capture: only traffic
-  sent through the proxies is tunnelled. Other processes are unaffected.
-- **Proxies have no authentication** and bind loopback by default. Binding them
-  to a non-loopback address exposes an unauthenticated open proxy.
+- **WireGuard only.** No MASQUE. If Cloudflare retires WireGuard ingress for your
+  account, this library stops working.
+- **Userspace only.** Only traffic sent through the proxies is tunnelled.
+- **No proxy authentication.** The proxies bind loopback; a non-loopback bind
+  requires `Config.AllowRemote`.
+- **Rotation disturbs live traffic.** Each rejected candidate moves the tunnel, so
+  rotate with a pause rather than in a tight loop.
 - **Free-tier quotas.** Registration is unauthenticated; abusing it is abusive.
   WARP+ needs `Config.License`.
-- Endpoint discovery probes Cloudflare with handshakes. Keep the default budget
-  and don't run it in a tight loop.
-- **Continuous rotation disturbs live proxied traffic.** Every rejected candidate
-  moves the tunnel and expires the current keypair, so under back-to-back
-  rotations new and in-flight proxy requests can stall; the stress reports show
-  7–27% timeouts at 4 concurrent request loops (errors are client timeouts, the
-  tunnel itself stays healthy). Rotate with a pause in between, or treat a
-  rotation as a brief maintenance window, until candidate probing is isolated
-  from the live tunnel.
 
-## Verification
+## Security
 
-```sh
-go test ./...                        # offline: unit tests, no network
-WARP_LIVE=1 go test -run TestLiveSelfCheck -v -timeout 45m
-```
+`identity.json` holds an X25519 private key in plaintext, written 0600 in a 0700
+directory. Windows does not enforce the mode, so there the protection is the
+location of `DataDir`.
 
-The live test registers an account, asserts the egress IP differs from the
-host's direct IP, checks `warp=on` through SOCKS5 and HTTP, runs 20 rotations
-and prints/writes the table, then asserts the proxy refuses connections after
-`Stop`.
+Report vulnerabilities privately through GitHub Security Advisories, not a public
+issue.
 
-Rotation stress / benchmark (latency percentiles + concurrent proxy load):
+## Contributing
 
-```sh
-WARP_LIVE=1 go test -run TestLiveRotationStress -v -timeout 30m
-# env: WARP_STRESS_N=30  WARP_STRESS_LOAD=4  WARP_STRESS_KEEPALIVE=1
-#      WARP_STRESS_REPORT=stress_report.txt
-```
+`go build ./...`, `go vet ./...` and `go test ./...` must pass offline before a
+change is done. Live suites need `WARP_LIVE=1` and real internet, and must never
+run in CI. See [AGENTS.md](AGENTS.md) for the full contributor guide.
 
-Reports are written to `stress_report.txt` (or `WARP_STRESS_REPORT`), including
-`stress_idle.txt` and `stress_keepalive.txt` in this repo.
+## License
 
-## Module path
-
-The module is `github.com/warpsdk/warp`. Rename it in `go.mod` (and imports) if
-you publish under a different path.
+[MIT](LICENSE)

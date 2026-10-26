@@ -20,17 +20,14 @@ import (
 
 var b64 = base64.StdEncoding
 
-// Identity is a registered WARP account plus the locally held X25519 private
-// key. The private key never leaves the machine: the WARP API only ever sees
-// the public half.
 type Identity struct {
 	ID            string
 	Token         string
 	License       string
-	PrivateKey    string // standard base64, 32-byte X25519 private key
-	PublicKey     string // standard base64
-	PeerPublicKey string // standard base64
-	Endpoint      string // as returned by the API, usually a hostname:port
+	PrivateKey    string
+	PublicKey     string
+	PeerPublicKey string
+	Endpoint      string
 	Ports         []int
 	AddressV4     netip.Prefix
 	AddressV6     netip.Prefix
@@ -89,7 +86,6 @@ type registerRequest struct {
 	WarpEnabled bool   `json:"warp_enabled"`
 }
 
-// generateKeys makes an X25519 keypair with crypto/ecdh.
 func generateKeys() (priv, pub []byte, err error) {
 	k, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
@@ -141,8 +137,6 @@ func identityFromDoc(priv string, doc registrationDoc) (*Identity, error) {
 	}, nil
 }
 
-// parseInterfaceAddr accepts both "a.b.c.d/32" and the bare "a.b.c.d" the
-// live API returns.
 func parseInterfaceAddr(s string, bits int) (netip.Prefix, error) {
 	if p, err := netip.ParsePrefix(s); err == nil {
 		return p, nil
@@ -154,8 +148,6 @@ func parseInterfaceAddr(s string, bits int) (netip.Prefix, error) {
 	return netip.PrefixFrom(ip, bits), nil
 }
 
-// Register creates a new WARP account. The returned Identity holds the locally
-// generated private key; persist it or it is lost.
 func Register(ctx context.Context) (*Identity, error) {
 	priv, pub, err := generateKeys()
 	if err != nil {
@@ -176,7 +168,6 @@ func Register(ctx context.Context) (*Identity, error) {
 	return identityFromDoc(b64.EncodeToString(priv), doc)
 }
 
-// Get refreshes the identity document from the API (GET /reg/{id}).
 func (id *Identity) Get(ctx context.Context) error {
 	var doc registrationDoc
 	if err := newAPI(id.Token).request(ctx, http.MethodGet, "/reg/"+id.ID, nil, &doc); err != nil {
@@ -190,7 +181,6 @@ func (id *Identity) Get(ctx context.Context) error {
 	return nil
 }
 
-// SetLicense applies a WARP+ license key (PUT /reg/{id}/account).
 func (id *Identity) SetLicense(ctx context.Context, license string) error {
 	body := map[string]string{"license": license}
 	if err := newAPI(id.Token).request(ctx, http.MethodPut, "/reg/"+id.ID+"/account", body, nil); err != nil {
@@ -199,7 +189,6 @@ func (id *Identity) SetLicense(ctx context.Context, license string) error {
 	return id.Get(ctx)
 }
 
-// Delete deregisters the account (DELETE /reg/{id}). It is irreversible.
 func (id *Identity) Delete(ctx context.Context) error {
 	return newAPI(id.Token).request(ctx, http.MethodDelete, "/reg/"+id.ID, nil, nil)
 }
@@ -210,8 +199,6 @@ type identityFile struct {
 	Document   json.RawMessage `json:"document"`
 }
 
-// document returns what will be persisted, synthesising a document for an
-// Identity that was built by hand instead of registered.
 func (id *Identity) document() registrationDoc {
 	if id.doc.ID != "" {
 		return id.doc
@@ -232,7 +219,6 @@ func (id *Identity) document() registrationDoc {
 	return doc
 }
 
-// Save writes the identity to dir/identity.json with 0600 permissions.
 func (id *Identity) Save(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -253,7 +239,6 @@ func (id *Identity) Save(dir string) error {
 	return os.Rename(tmp, path)
 }
 
-// LoadIdentity reads a persisted identity.
 func LoadIdentity(dir string) (*Identity, error) {
 	b, err := os.ReadFile(filepath.Join(dir, "identity.json"))
 	if err != nil {
@@ -270,8 +255,6 @@ func LoadIdentity(dir string) (*Identity, error) {
 	return identityFromDoc(f.PrivateKey, doc)
 }
 
-// loadOrRegisterIdentity loads dir/identity.json or registers a fresh account
-// and persists it.
 func loadOrRegisterIdentity(ctx context.Context, dir string) (*Identity, error) {
 	id, err := LoadIdentity(dir)
 	if err == nil {
@@ -290,7 +273,6 @@ func loadOrRegisterIdentity(ctx context.Context, dir string) (*Identity, error) 
 	return id, nil
 }
 
-// uapi renders the WireGuard configuration protocol config for one peer.
 func (id *Identity) uapi(endpoint netip.AddrPort) (string, error) {
 	priv, err := b64.DecodeString(id.PrivateKey)
 	if err != nil || len(priv) != 32 {

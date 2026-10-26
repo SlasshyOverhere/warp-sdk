@@ -20,14 +20,6 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-// TestLiveRotationStress rotates the egress as hard as the verified pool allows
-// while concurrent proxied requests run through SOCKS5. It reports rotation
-// latency percentiles, unique-exit counts and proxy error rate.
-//
-//	WARP_LIVE=1 go test -run TestLiveRotationStress -v -timeout 30m
-//
-// Env: WARP_STRESS_N (attempts, default 30), WARP_STRESS_LOAD (parallel proxied
-// request loops, default 4).
 func TestLiveRotationStress(t *testing.T) {
 	if os.Getenv("WARP_LIVE") != "1" {
 		t.Skip("set WARP_LIVE=1 to run the live rotation stress test")
@@ -145,7 +137,7 @@ func TestLiveRotationStress(t *testing.T) {
 		start := time.Now()
 		old, fresh, err := c.Rotate(rctx)
 		rcancel()
-		axis := c.Stats().LastRotateAxis
+		axis := "endpoint"
 		rows = append(rows, row{n: i, took: time.Since(start), old: old, fresh: fresh, axis: axis, err: err})
 		if err != nil {
 			if errors.Is(err, ErrNoNewEgress) {
@@ -220,7 +212,7 @@ func TestLiveRotationStress(t *testing.T) {
 	t.Logf("\n%s", sb.String())
 	report := os.Getenv("WARP_STRESS_REPORT")
 	if report == "" {
-		report = "stress_report.txt"
+		report = "stress_report.local.txt"
 	}
 	if err := os.WriteFile(report, []byte(sb.String()), 0o644); err != nil {
 		t.Logf("write stress report: %v", err)
@@ -259,7 +251,6 @@ func envInt(key string, def int) int {
 	return def
 }
 
-// durStats renders mean/p50/p90/p99/min/max for a latency slice.
 func durStats(ds []time.Duration) string {
 	if len(ds) == 0 {
 		return "n/a"

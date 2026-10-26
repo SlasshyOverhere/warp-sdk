@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -99,10 +100,28 @@ func (c *Client) handleForward(w http.ResponseWriter, r *http.Request) {
 }
 
 func stripHopHeaders(h http.Header) {
+	drop := map[string]bool{}
+	for k := range h {
+		if !strings.EqualFold(k, "Connection") {
+			continue
+		}
+		for _, v := range h[k] {
+			for _, tok := range strings.Split(v, ",") {
+				if tok = strings.TrimSpace(tok); tok != "" {
+					drop[strings.ToLower(tok)] = true
+				}
+			}
+		}
+	}
 	for _, k := range []string{
 		"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
 		"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 	} {
-		h.Del(k)
+		drop[strings.ToLower(k)] = true
+	}
+	for k := range h {
+		if drop[strings.ToLower(k)] {
+			delete(h, k)
+		}
 	}
 }

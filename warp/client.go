@@ -16,57 +16,46 @@ import (
 	"time"
 )
 
-// Config configures a Client. Zero values are usable: SOCKS binds an ephemeral
-// loopback port, identity is registered on first Start and persisted in DataDir.
 type Config struct {
-	DataDir   string
-	Identity  *Identity
-	SOCKS     *netip.AddrPort
-	HTTP      *netip.AddrPort
-	Endpoints []string
-	MTU       int
-	License   string
-	WarpPlus  bool
-	// OnSOCKSDial, when set, is called once per SOCKS5 CONNECT with the target,
-	// the dial error (nil on success) and how long it took. It exists so a host
-	// application can surface tunnel traffic in its own logs; it must not block.
-	OnSOCKSDial func(target string, err error, took time.Duration)
+	DataDir           string
+	Identity          *Identity
+	SOCKS             *netip.AddrPort
+	HTTP              *netip.AddrPort
+	Endpoints         []string
+	MTU               int
+	License           string
+	EgressReuseWindow int
+	AllowRemote       bool
+	OnSOCKSDial       func(target string, err error, took time.Duration)
 }
+
+var (
+	ErrAlreadyStarted = errors.New("warp: client already started")
+	ErrStopped        = errors.New("warp: client already stopped")
+)
 
 const (
 	traceURL     = "https://www.cloudflare.com/cdn-cgi/trace"
 	drainTimeout = 10 * time.Second
 	scanBudget   = 20 * time.Second
 
-	// traceTimeout bounds ONE egress-trace round trip. A healthy WARP trace
-	// answers in well under a second; anything slower is a stalled SYN after an
-	// endpoint change, where netstack retransmits on a 1s/2s/4s/8s backoff. The
-	// old 20s cap let a single stalled attempt own the whole rotation, which is
-	// what made rotations occasionally take 20-40s through the proxy. Short
-	// attempts plus a re-dial recover in about a second.
-	traceTimeout = 1800 * time.Millisecond
-	// traceAttempts is how many short attempts one lookup may make before the
-	// egress is declared unknown. Bounded by the caller's ctx as well.
+	// Short on purpose: a stalled path retransmits on a 1s/2s/4s/8s backoff.
+	traceTimeout  = 1800 * time.Millisecond
 	traceAttempts = 5
 )
 
-// Stats is a snapshot of client state. EndpointRotations counts rotations that
-// produced a new egress IP; RecentEgress is the bounded set of addresses the
-// last few rotations landed on.
 type Stats struct {
 	Endpoint          netip.AddrPort
 	Uptime            time.Duration
 	ActiveConns       int64
 	TxBytes           uint64
 	RxBytes           uint64
-	LastRotateAxis    string
 	EndpointRotations uint64
 	FailedRotations   uint64
 	RecentEgress      []netip.Addr
 	UsedEgress        []netip.Addr
 }
 
-// Client owns the identity and the tunnels. It is safe for concurrent use.
 type Client struct {
 	cfg     Config
 	dataDir string
@@ -95,26 +84,25 @@ type Client struct {
 	done    chan struct{}
 	active  atomic.Int64
 
-	startedAt atomic.Int64 // unix nanos
-	endpoint  atomic.Value // netip.AddrPort
-	lastAxis  atomic.Value // string
+	startedAt atomic.Int64
+	endpoint  atomic.Value
 	epRot     atomic.Uint64
 	failRot   atomic.Uint64
 
-	// recentMu guards the bounded rotation memory. epEgress is a hint cache:
-	// endpoint -> last egress seen from it, so Rotate can prefer endpoints it
-	// has not already proven to land on a recent address.
 	recentMu     sync.Mutex
 	recentEgress []netip.Addr
 	usedEgress   []netip.Addr
-	usedSet      map[netip.Addr]struct{}
 	recentEP     []netip.AddrPort
 	epEgress     map[netip.AddrPort]netip.Addr
 }
 
-// NewClient binds the local proxy listeners and prepares the data directory.
-// No network calls happen here; registration and tunnel setup happen in Start.
 func NewClient(cfg Config) (*Client, error) {
+	if err := checkBind("socks", cfg.SOCKS, cfg.AllowRemote); err != nil {
+		return nil, err
+	}
+	if err := checkBind("http", cfg.HTTP, cfg.AllowRemote); err != nil {
+		return nil, err
+	}
 	c := &Client{cfg: cfg, done: make(chan struct{})}
 	if cfg.DataDir == "" {
 		dir, err := defaultDataDir()
@@ -174,6 +162,13 @@ func defaultDataDir() (string, error) {
 	return filepath.Join(dir, "warpsdk"), nil
 }
 
+func checkBind(name string, ap *netip.AddrPort, allowRemote bool) error {
+	if ap == nil || allowRemote || ap.Addr().IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("warp: %s proxy would listen on non-loopback %s and has no authentication; set Config.AllowRemote to allow it", name, ap)
+}
+
 func addrPortOf(a net.Addr) (netip.AddrPort, error) {
 	ap, err := netip.ParseAddrPort(a.String())
 	if err != nil {
@@ -182,13 +177,10 @@ func addrPortOf(a net.Addr) (netip.AddrPort, error) {
 	return ap, nil
 }
 
-// SOCKSAddr is the bound SOCKS5 address. Valid immediately after NewClient.
 func (c *Client) SOCKSAddr() netip.AddrPort { return c.socksAddr }
 
-// HTTPAddr is the bound HTTP proxy address, or the zero value when disabled.
 func (c *Client) HTTPAddr() netip.AddrPort { return c.httpAddr }
 
-// Identity returns the active WARP identity, or nil before Start.
 func (c *Client) Identity() *Identity {
 	c.idMu.RLock()
 	defer c.idMu.RUnlock()
@@ -201,14 +193,12 @@ func (c *Client) setIdentity(id *Identity) {
 	c.idMu.Unlock()
 }
 
-// Start registers (or reloads) the identity, brings the tunnel up, serves the
-// proxies and blocks until ctx is done or Stop is called.
 func (c *Client) Start(ctx context.Context) error {
 	if c.stopped.Load() {
-		return errors.New("warp: client already stopped")
+		return ErrStopped
 	}
 	if !c.started.CompareAndSwap(false, true) {
-		return errors.New("warp: client already started")
+		return ErrAlreadyStarted
 	}
 	if err := c.bringUp(ctx); err != nil {
 		c.started.Store(false)
@@ -273,8 +263,6 @@ func (c *Client) bringUp(ctx context.Context) error {
 	return lastErr
 }
 
-// swapTunnel installs t and retires the old tunnel without closing connections
-// that are still using it.
 func (c *Client) swapTunnel(t *tunnel) {
 	c.tunMu.Lock()
 	old := c.tun
@@ -288,18 +276,17 @@ func (c *Client) swapTunnel(t *tunnel) {
 	}
 }
 
+// Take the reference under the read lock: swapTunnel retires the old tunnel.
 func (c *Client) acquireTunnel() (*tunnel, func()) {
 	c.tunMu.RLock()
+	defer c.tunMu.RUnlock()
 	t := c.tun
-	c.tunMu.RUnlock()
 	if t == nil {
 		return nil, func() {}
 	}
 	return t, t.acquire()
 }
 
-// dial connects through the current tunnel. The tunnel reference is held until
-// the returned connection is closed.
 func (c *Client) dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	t, release := c.acquireTunnel()
 	if t == nil {
@@ -333,8 +320,6 @@ func (c *trackedConn) CloseWrite() error {
 	return err
 }
 
-// Stop stops accepting, drains in-flight connections (bounded), then closes the
-// WireGuard devices.
 func (c *Client) Stop() error {
 	c.stopOne.Do(func() {
 		c.stopped.Store(true)
@@ -365,19 +350,14 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-// EgressIP returns the public IP the tunnel exits from, in whichever family the
-// trace host resolves to through netstack (in practice IPv6). Use EgressIP4 or
-// EgressIP6 when the family matters.
 func (c *Client) EgressIP(ctx context.Context) (netip.Addr, error) {
 	return c.egressIP(ctx, 0)
 }
 
-// EgressIP4 returns the IPv4 address WARP exits from.
 func (c *Client) EgressIP4(ctx context.Context) (netip.Addr, error) {
 	return c.egressIP(ctx, 4)
 }
 
-// EgressIP6 returns the IPv6 address WARP exits from.
 func (c *Client) EgressIP6(ctx context.Context) (netip.Addr, error) {
 	return c.egressIP(ctx, 6)
 }
@@ -391,12 +371,6 @@ func (c *Client) egressIP(ctx context.Context, family int) (netip.Addr, error) {
 	return egressIPVia(ctx, t, family)
 }
 
-// egressIPVia is the tunnel-level implementation, reusable by tests and by
-// future rotation axes that do not go through the Client.
-//
-// It re-handshakes between attempts. A stalled data path after an ingress move
-// keeps answering "keypair valid" while dropping every packet, so retrying the
-// HTTP request alone just burns the budget on a dead tunnel.
 func egressIPVia(ctx context.Context, t *tunnel, family int) (netip.Addr, error) {
 	tr := &http.Transport{
 		DialContext: func(dctx context.Context, network, addr string) (net.Conn, error) {
@@ -409,9 +383,6 @@ func egressIPVia(ctx context.Context, t *tunnel, family int) (netip.Addr, error)
 	}
 	hc := &http.Client{Transport: tr, Timeout: traceTimeout}
 	defer tr.CloseIdleConnections()
-	// A handshake rekey can truncate the first trace request, and a stalled SYN
-	// can sit for seconds before the tunnel notices. Retry with a short cap
-	// rather than letting one attempt consume the caller's whole budget.
 	var lastErr error
 	for attempt := 0; attempt < traceAttempts; attempt++ {
 		ip, err := traceEgressOnce(ctx, hc, family)
@@ -419,9 +390,7 @@ func egressIPVia(ctx context.Context, t *tunnel, family int) (netip.Addr, error)
 			return ip, nil
 		}
 		lastErr = err
-		// Any failed attempt may be a dead path rather than a slow one: a moved
-		// ingress can keep reporting a valid keypair while dropping every packet.
-		// A fresh handshake is ~200ms and is what turns a 15s stall into seconds.
+		// A moved ingress can keep a valid keypair while dropping every packet.
 		hctx, hcancel := context.WithTimeout(ctx, endpointHandshake)
 		_ = t.rehandshake(hctx)
 		hcancel()
@@ -474,8 +443,6 @@ func traceEgressOnce(ctx context.Context, hc *http.Client, family int) (netip.Ad
 	return netip.Addr{}, fmt.Errorf("warp: no ip= in trace response")
 }
 
-// SetEndpoint moves the tunnel to ep and waits for a handshake. The walk inside
-// Rotate uses the ctx-taking variant so it can be bounded by its budget.
 func (c *Client) SetEndpoint(ep Endpoint) error {
 	ctx, cancel := context.WithTimeout(context.Background(), endpointHandshake+5*time.Second)
 	defer cancel()
@@ -493,20 +460,15 @@ func (c *Client) setEndpoint(ctx context.Context, ep Endpoint) error {
 	}
 	defer release()
 	err := t.setEndpoint(ctx, ap)
-	// The device may have moved even when the handshake failed, so publish the
-	// device's endpoint rather than assuming the attempt left it alone.
 	c.endpoint.Store(t.endpoint())
 	return err
 }
 
-// Stats returns a cheap snapshot; byte counters come from the WireGuard peer.
 func (c *Client) Stats() Stats {
 	ep, _ := c.endpoint.Load().(netip.AddrPort)
-	axis, _ := c.lastAxis.Load().(string)
 	s := Stats{
 		Endpoint:          ep,
 		ActiveConns:       c.active.Load(),
-		LastRotateAxis:    axis,
 		EndpointRotations: c.epRot.Load(),
 		FailedRotations:   c.failRot.Load(),
 	}

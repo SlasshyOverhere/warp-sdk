@@ -3,11 +3,13 @@ package warp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
@@ -15,7 +17,6 @@ import (
 	"golang.zx2c4.com/wireguard/tun"
 )
 
-// Endpoint is a WARP ingress that completed a real WireGuard handshake.
 type Endpoint struct {
 	AddrPort netip.AddrPort
 	RTT      time.Duration
@@ -28,8 +29,6 @@ const (
 	scanCacheTTL    = 5 * time.Minute
 )
 
-// warpCIDRs are Cloudflare's published WARP/WireGuard ingress ranges. Port
-// 2408 is used for discovery, matching the scanner contract.
 var warpCIDRs = []string{
 	"162.159.192.0/24",
 	"162.159.193.0/24",
@@ -43,8 +42,6 @@ var warpCIDRs = []string{
 
 const scanPort = 2408
 
-// Endpoints scans for handshake-verified endpoints and returns them ranked by
-// RTT. Results are cached briefly so repeated rotations stay cheap.
 func (c *Client) Endpoints(ctx context.Context) ([]Endpoint, error) {
 	c.scanMu.Lock()
 	defer c.scanMu.Unlock()
@@ -77,13 +74,17 @@ func scanEndpoints(ctx context.Context, id *Identity, override []string) ([]Endp
 	defer cancel()
 
 	var (
-		mu  sync.Mutex
-		eps []Endpoint
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, scanConcurrency)
+		mu   sync.Mutex
+		eps  []Endpoint
+		wg   sync.WaitGroup
+		full atomic.Bool
+		sem  = make(chan struct{}, scanConcurrency)
 	)
 targets:
 	for _, ap := range targets {
+		if full.Load() {
+			break targets
+		}
 		select {
 		case <-ctx.Done():
 			break targets
@@ -102,6 +103,7 @@ targets:
 			n := len(eps)
 			mu.Unlock()
 			if n >= maxScanResults {
+				full.Store(true)
 				cancel()
 			}
 		}(ap)
@@ -111,22 +113,9 @@ targets:
 	return eps, nil
 }
 
-// scanTargets expands Config.Endpoints when given, otherwise the CIDR list
-// plus whatever engage.cloudflareclient.com resolves to.
 func scanTargets(ctx context.Context, override []string) ([]netip.AddrPort, error) {
-	if len(override) > 0 {
-		out := make([]netip.AddrPort, 0, len(override))
-		for _, o := range override {
-			ap, err := resolveEndpoint(ctx, o)
-			if err != nil {
-				continue
-			}
-			out = append(out, ap)
-		}
-		return out, nil
-	}
-	seen := make(map[netip.AddrPort]struct{}, 2048)
 	out := make([]netip.AddrPort, 0, 2048)
+	seen := make(map[netip.AddrPort]struct{}, 2048)
 	add := func(ap netip.AddrPort) {
 		if _, ok := seen[ap]; ok {
 			return
@@ -134,14 +123,35 @@ func scanTargets(ctx context.Context, override []string) ([]netip.AddrPort, erro
 		seen[ap] = struct{}{}
 		out = append(out, ap)
 	}
+	if len(override) > 0 {
+		var firstErr error
+		for _, o := range override {
+			ap, err := resolveEndpoint(ctx, o)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			add(ap)
+		}
+		if len(out) == 0 {
+			return nil, fmt.Errorf("warp: no endpoint override resolved: %w", firstErr)
+		}
+		return out, nil
+	}
 	if ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", "engage.cloudflareclient.com"); err == nil {
 		for _, ip := range ips {
 			add(netip.AddrPortFrom(ip, scanPort))
 		}
 	}
-	// Interleave the ranges so an early-exit scan samples every CIDR instead of
-	// exhausting the first /24. That keeps the verified pool diverse, which is
-	// what endpoint rotation depends on.
+	for _, ap := range warpScanTargets() {
+		add(ap)
+	}
+	return out, nil
+}
+
+func warpScanTargets() []netip.AddrPort {
 	bases := make([][4]byte, 0, len(warpCIDRs))
 	for _, cidr := range warpCIDRs {
 		p, err := netip.ParsePrefix(cidr)
@@ -150,17 +160,16 @@ func scanTargets(ctx context.Context, override []string) ([]netip.AddrPort, erro
 		}
 		bases = append(bases, p.Masked().Addr().As4())
 	}
+	out := make([]netip.AddrPort, 0, len(bases)*254)
 	for i := 1; i < 255; i++ {
 		for _, base := range bases {
 			base[3] = byte(i)
-			add(netip.AddrPortFrom(netip.AddrFrom4(base), scanPort))
+			out = append(out, netip.AddrPortFrom(netip.AddrFrom4(base), scanPort))
 		}
 	}
-	return out, nil
+	return out
 }
 
-// probeHandshake performs a real WireGuard handshake against ap and returns
-// the time it took. The tun side is a black hole: only the handshake matters.
 func probeHandshake(ctx context.Context, id *Identity, ap netip.AddrPort) (time.Duration, error) {
 	peerKey, err := noiseKeyFromB64(id.PeerPublicKey)
 	if err != nil {
@@ -204,16 +213,18 @@ func probeHandshake(ctx context.Context, id *Identity, ap netip.AddrPort) (time.
 	}
 }
 
-// voidTun is a tun.Device that never delivers packets and discards writes.
 type voidTun struct {
+	events chan tun.Event
 	closed chan struct{}
 	once   sync.Once
 }
 
-func newVoidTun() *voidTun { return &voidTun{closed: make(chan struct{})} }
+func newVoidTun() *voidTun {
+	return &voidTun{events: make(chan tun.Event), closed: make(chan struct{})}
+}
 
 func (v *voidTun) File() *os.File           { return nil }
-func (v *voidTun) Events() <-chan tun.Event { return nil }
+func (v *voidTun) Events() <-chan tun.Event { return v.events }
 func (v *voidTun) MTU() (int, error)        { return 1280, nil }
 func (v *voidTun) Name() (string, error)    { return "warp-scan", nil }
 func (v *voidTun) BatchSize() int           { return 1 }
@@ -231,6 +242,9 @@ func (v *voidTun) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
 }
 
 func (v *voidTun) Close() error {
-	v.once.Do(func() { close(v.closed) })
+	v.once.Do(func() {
+		close(v.closed)
+		close(v.events)
+	})
 	return nil
 }
