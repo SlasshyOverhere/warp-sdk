@@ -1,6 +1,6 @@
 module github.com/SlasshyOverhere/warp-sdk
 
-go 1.26.5
+go 1.24.0
 
 require (
 	github.com/refraction-networking/utls v1.8.2
