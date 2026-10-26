@@ -191,7 +191,7 @@ func TestLiveSelfCheck(t *testing.T) {
 		fmt.Fprintf(&sb, "\ndistinct addresses: %d of %d runs\n", len(distinct), len(rows))
 		fmt.Fprintf(&sb, "reused addresses: %d\n", reused)
 		fmt.Fprintf(&sb, "cycle length: %s\n", cycle)
-		if err := os.WriteFile("rotation_table.txt", []byte(sb.String()), 0o644); err != nil {
+		if err := os.WriteFile("../docs/rotation_table.txt", []byte(sb.String()), 0o644); err != nil {
 			t.Logf("write rotation table: %v", err)
 		}
 		t.Logf("rotation results:\n%s", sb.String())
@@ -255,7 +255,7 @@ func TestLiveSelfCheck(t *testing.T) {
 			}
 			fmt.Fprintf(&sb, "identity\t%d\t%s\n", i, ip)
 		}
-		f, err := os.OpenFile("rotation_table.txt", os.O_APPEND|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile("../docs/rotation_table.txt", os.O_APPEND|os.O_WRONLY, 0o644)
 		if err != nil {
 			t.Fatalf("open rotation table: %v", err)
 		}

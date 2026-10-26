@@ -13,6 +13,10 @@ an UNOFFICIAL SDK: not affiliated with, endorsed by or supported by Cloudflare.
 
 ## Layout
 
+The Go package lives in `warp/` (import `github.com/SlasshyOverhere/warp-sdk/warp`);
+the paths below are relative to it. Repository root holds `go.mod`, `go.sum`,
+`README.md`, `LICENSE`, `AGENTS.md`, `CLAUDE.md` and `docs/`.
+
 - `api.go`: the WARP API client (`https://api.cloudflareclient.com/v0a1922`),
   the `CF-Client-Version` and user agent constants, `apiError`, and the TLS
   dialer that tries `crypto/tls` then retries with a Chrome uTLS fingerprint.
@@ -35,8 +39,9 @@ an UNOFFICIAL SDK: not affiliated with, endorsed by or supported by Cloudflare.
   proxying, and hop-by-hop header stripping.
 - `*_test.go`: offline unit tests for pure functions; `selfcheck_test.go` and
   `stress_test.go` are the live suites gated on `WARP_LIVE=1`.
-- `rotation_table.txt`, `stress_idle.txt`, `stress_keepalive.txt`,
-  `stress_report.txt`: committed live-run evidence. Historical, not inputs.
+- `docs/rotation_table.txt`, `docs/stress_idle.txt`, `docs/stress_keepalive.txt`,
+  `docs/stress_report.txt`: committed live-run evidence. Historical, not inputs.
+  The live suites write here, so run them from `warp/`.
 
 ## Build and verify
 
@@ -63,9 +68,8 @@ Live environment variables:
 - `WARP_STRESS_N`: rotation attempts, default 30.
 - `WARP_STRESS_LOAD`: parallel proxied request loops, default 4.
 - `WARP_STRESS_KEEPALIVE=1`: reuses proxy connections during stress.
-- `WARP_STRESS_REPORT`: report path, default `stress_report.txt` at the repo
-  root. Point it at a temp path unless you intend to update the committed
-  evidence.
+- `WARP_STRESS_REPORT`: report path, default `docs/stress_report.txt`. Point it
+  at a temp path unless you intend to update the committed evidence.
 - `WARP_TLS=std|utls`: pins one TLS dialer instead of try-then-retry.
 - `WARP_DEBUG=1`: verbose WireGuard device logging.
 

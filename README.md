@@ -1,4 +1,4 @@
-# warpsdk - userspace Cloudflare WARP in Go
+# warp-sdk - userspace Cloudflare WARP in Go
 
 **Unofficial, not affiliated with Cloudflare.** This is not an official
 Cloudflare SDK and is not affiliated with, endorsed by, or supported by
@@ -16,7 +16,7 @@ edits.
 ## Install
 
 ```sh
-go get github.com/SlasshyOverhere/warp-sdk
+go get github.com/SlasshyOverhere/warp-sdk/warp
 ```
 
 A minimal program:
@@ -30,7 +30,7 @@ import (
 	"net/netip"
 	"time"
 
-	warp "github.com/SlasshyOverhere/warp-sdk"
+	"github.com/SlasshyOverhere/warp-sdk/warp"
 )
 
 func main() {
@@ -119,7 +119,7 @@ while a stalled path retransmits on a 1s/2s/4s/8s backoff, so a generous cap
 would let one stalled attempt own the whole operation.
 
 The live self-check writes the rotation table (committed as
-`rotation_table.txt`): 20 runs, random start, strict lifetime uniqueness.
+`docs/rotation_table.txt`): 20 runs, random start, strict lifetime uniqueness.
 It ends with the distinct-address count, the reused-address count (must be 0)
 and the sequence cycle length, then a measured IPv4 pinning section: five
 endpoint swaps and five fresh `Register` calls. In that measurement every IPv4
@@ -271,10 +271,10 @@ WARP_LIVE=1 go test -run TestLiveRotationStress -v -timeout 30m
 #      WARP_STRESS_REPORT=<path>
 ```
 
-Reports are written to `stress_report.txt` (or `WARP_STRESS_REPORT`). The
-committed evidence lives at the repo root: `rotation_table.txt`,
-`stress_report.txt`, `stress_idle.txt` and `stress_keepalive.txt`. They are
-historical output, not inputs, and a local run should write to a temp path.
+Reports are written to `docs/stress_report.txt` (or `WARP_STRESS_REPORT`). The
+committed evidence lives in `docs/`: `rotation_table.txt`, `stress_report.txt`,
+`stress_idle.txt` and `stress_keepalive.txt`. They are historical output, not
+inputs, and a local run should write to a temp path.
 
 ## Contributing
 
