@@ -20,22 +20,19 @@ import (
 )
 
 var (
-	errNotStarted = errors.New("warp: client not started")
-	errHandshake  = errors.New("warp: wireguard handshake timed out")
-	// ErrNoNewEgress is returned by Rotate when no endpoint produced a new IP.
+	errNotStarted     = errors.New("warp: client not started")
+	errHandshake      = errors.New("warp: wireguard handshake timed out")
 	ErrNoNewEgress    = errors.New("warp: no new egress IP found")
 	handshakeTimeout  = 10 * time.Second
 	endpointHandshake = 8 * time.Second
 )
 
-// tunnel is one WireGuard device plus its netstack. Its lifetime is refcounted
-// so identity rotation never cuts live proxied connections.
 type tunnel struct {
 	dev     *device.Device
 	net     *netstack.Net
 	peerKey device.NoisePublicKey
-	ep      atomic.Value // netip.AddrPort
-	mu      sync.Mutex   // serialises endpoint changes
+	ep      atomic.Value
+	mu      sync.Mutex
 	refs    atomic.Int64
 	retired atomic.Bool
 	once    sync.Once
@@ -102,7 +99,6 @@ func (t *tunnel) endpoint() netip.AddrPort {
 	return v
 }
 
-// dial runs a TCP connection through the WireGuard tunnel.
 func (t *tunnel) dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	switch network {
 	case "", "tcp", "tcp4", "tcp6":
@@ -112,7 +108,6 @@ func (t *tunnel) dial(ctx context.Context, network, addr string) (net.Conn, erro
 	}
 }
 
-// dialFamily dials addr over the tunnel, restricted to one IP family.
 func (t *tunnel) dialFamily(ctx context.Context, addr string, family int) (net.Conn, error) {
 	host, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -139,7 +134,6 @@ func (t *tunnel) dialFamily(ctx context.Context, addr string, family int) (net.C
 	return nil, fmt.Errorf("warp: no IPv%d address for %s", family, host)
 }
 
-// lookupHost resolves host through the tunnel's DNS (1.1.1.1/1.0.0.1).
 func (t *tunnel) lookupHost(ctx context.Context, host string) ([]netip.Addr, error) {
 	if ip, err := netip.ParseAddr(host); err == nil {
 		return []netip.Addr{ip}, nil
@@ -160,8 +154,6 @@ func (t *tunnel) lookupHost(ctx context.Context, host string) ([]netip.Addr, err
 	return out, nil
 }
 
-// setEndpoint moves the peer to a new endpoint and forces a fresh handshake.
-// In-flight connections survive: they live in netstack and retransmit.
 func (t *tunnel) setEndpoint(ctx context.Context, ep netip.AddrPort) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -171,8 +163,7 @@ func (t *tunnel) setEndpoint(ctx context.Context, ep netip.AddrPort) error {
 	if err := t.dev.IpcSet(cfg); err != nil {
 		return fmt.Errorf("warp: set endpoint %s: %w", ep, err)
 	}
-	// Record the move immediately: the device is already pointed at ep, so
-	// reported state must stay true even if the handshake below aborts.
+	// The device already points at ep, so record it before the handshake.
 	t.ep.Store(ep)
 	peer := t.dev.LookupPeer(t.peerKey)
 	if peer == nil {
@@ -186,11 +177,7 @@ func (t *tunnel) setEndpoint(ctx context.Context, ep netip.AddrPort) error {
 	return nil
 }
 
-// rehandshake forces a brand-new handshake with the current endpoint. An ingress
-// move can leave the keypair nominally valid while the data path is dead (the
-// peer accepted the handshake but stops forwarding). Re-dialling TCP does not
-// clear that -- only a fresh keypair does. It is cheap (~200ms) and is what turns
-// a 15s stall into a couple of seconds.
+// A moved ingress can keep a valid keypair while dropping every packet.
 func (t *tunnel) rehandshake(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -198,10 +185,6 @@ func (t *tunnel) rehandshake(ctx context.Context) error {
 	if peer == nil {
 		return errors.New("warp: peer not configured")
 	}
-	// Re-apply the endpoint as well as expiring the keypair: the ingress may have
-	// dropped the session entirely, in which case a fresh keypair alone still
-	// leaves the device dialling a route nobody answers on. Same UAPI shape as
-	// setEndpoint, which is the only other place that writes an endpoint.
 	if ep, ok := t.ep.Load().(netip.AddrPort); ok && ep.IsValid() {
 		peerHex := make([]byte, 32)
 		copy(peerHex, t.peerKey[:])
@@ -299,7 +282,6 @@ func (t *tunnel) close() {
 	t.once.Do(func() { t.dev.Close() })
 }
 
-// resolveEndpoint accepts "ip", "ip:port", "host:port" or a bare host.
 func resolveEndpoint(ctx context.Context, s string) (netip.AddrPort, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -325,7 +307,6 @@ func resolveEndpoint(ctx context.Context, s string) (netip.AddrPort, error) {
 	if err != nil {
 		return netip.AddrPort{}, fmt.Errorf("warp: resolve endpoint %s: %w", s, err)
 	}
-	// Prefer IPv4: WARP's WireGuard endpoints are v4-first.
 	for _, ip := range ips {
 		if ip.Is4() {
 			return netip.AddrPortFrom(ip, port), nil

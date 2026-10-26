@@ -148,7 +148,7 @@ func TestScanTargetsCIDRs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 8 ranges x 254 hosts, plus DNS seeds, deduped.
+
 	if len(got) < 8*250 {
 		t.Fatalf("only %d targets", len(got))
 	}

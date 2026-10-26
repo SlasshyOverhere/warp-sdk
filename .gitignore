@@ -1,5 +1,15 @@
 *.test
 *.test.exe
 *.exe
+*.out
+
+# local WARP account material
 warp-data/
 identity.json
+
+# scratch reports (the committed ones live at the root on purpose)
+stress_*.local.txt
+
+.opencode/
+.DS_Store
+Thumbs.db

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -29,11 +30,18 @@ const (
 )
 
 func (c *Client) serveSOCKS() {
+	backoff := 5 * time.Millisecond
 	for {
 		conn, err := c.socksLn.Accept()
 		if err != nil {
-			return
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			time.Sleep(backoff)
+			backoff = min(backoff*2, time.Second)
+			continue
 		}
+		backoff = 5 * time.Millisecond
 		c.active.Add(1)
 		go func() {
 			defer c.active.Add(-1)
@@ -170,13 +178,17 @@ func (c *Client) socksDoConnect(conn net.Conn, br *bufio.Reader, host string, po
 		return
 	}
 	defer up.Close()
-	writeSocksReply(conn, socksSucceeded, netip.AddrPort{})
+	bnd := netip.AddrPort{}
+	if la, ok := up.LocalAddr().(*net.TCPAddr); ok {
+		if addr, ok := netip.AddrFromSlice(la.IP); ok {
+			bnd = netip.AddrPortFrom(addr.Unmap(), uint16(la.Port))
+		}
+	}
+	writeSocksReply(conn, socksSucceeded, bnd)
 	_ = conn.SetDeadline(time.Time{})
 	relay(br, conn, up)
 }
 
-// socksDoUDP relays UDP datagrams for one association. Upstream sockets are
-// created through the tunnel, one per destination.
 func (c *Client) socksDoUDP(conn net.Conn) {
 	pc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -194,7 +206,7 @@ func (c *Client) socksDoUDP(conn net.Conn) {
 	}
 	defer release()
 
-	a := &udpAssoc{t: t, client: pc, up: make(map[netip.AddrPort]*gonet.UDPConn)}
+	a := &udpAssoc{t: t, client: pc, up: make(map[netip.AddrPort]*udpUpstream)}
 	defer a.close()
 	a.serve()
 	_, _ = io.Copy(io.Discard, conn)
@@ -204,14 +216,48 @@ type udpAssoc struct {
 	t       *tunnel
 	client  *net.UDPConn
 	mu      sync.Mutex
-	up      map[netip.AddrPort]*gonet.UDPConn
+	up      map[netip.AddrPort]*udpUpstream
+	done    chan struct{}
 	closed  bool
 	peer    netip.AddrPort
 	hasPeer bool
 }
 
+type udpUpstream struct {
+	conn *gonet.UDPConn
+	last time.Time
+}
+
+const udpUpstreamIdleTTL = 2 * time.Minute
+
 func (a *udpAssoc) serve() {
+	a.done = make(chan struct{})
 	go a.readClient()
+	go a.sweep()
+}
+
+func (a *udpAssoc) sweep() {
+	t := time.NewTicker(udpUpstreamIdleTTL / 2)
+	defer t.Stop()
+	for {
+		select {
+		case <-a.done:
+			return
+		case now := <-t.C:
+			a.expire(now)
+		}
+	}
+}
+
+func (a *udpAssoc) expire(now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for addr, u := range a.up {
+		if now.Sub(u.last) > udpUpstreamIdleTTL {
+			u.conn.Close()
+			delete(a.up, addr)
+		}
+	}
 }
 
 func (a *udpAssoc) readClient() {
@@ -256,14 +302,15 @@ func (a *udpAssoc) upstream(raddr netip.AddrPort) (*gonet.UDPConn, error) {
 	if a.closed {
 		return nil, errNotStarted
 	}
-	if uc, ok := a.up[raddr]; ok {
-		return uc, nil
+	if u, ok := a.up[raddr]; ok {
+		u.last = time.Now()
+		return u.conn, nil
 	}
 	uc, err := a.t.net.DialUDPAddrPort(netip.AddrPort{}, raddr)
 	if err != nil {
 		return nil, err
 	}
-	a.up[raddr] = uc
+	a.up[raddr] = &udpUpstream{conn: uc, last: time.Now()}
 	go a.readUpstream(raddr, uc)
 	return uc, nil
 }
@@ -288,8 +335,11 @@ func (a *udpAssoc) readUpstream(raddr netip.AddrPort, uc *gonet.UDPConn) {
 func (a *udpAssoc) close() {
 	a.mu.Lock()
 	a.closed = true
-	for k, uc := range a.up {
-		uc.Close()
+	if a.done != nil {
+		close(a.done)
+	}
+	for k, u := range a.up {
+		u.conn.Close()
 		delete(a.up, k)
 	}
 	a.mu.Unlock()
@@ -349,7 +399,6 @@ func closeWrite(c net.Conn) {
 	}
 }
 
-// reportSOCKSDial hands one connection to the host's hook, if it set one.
 func (c *Client) reportSOCKSDial(target string, err error, took time.Duration) {
 	if c.cfg.OnSOCKSDial == nil {
 		return

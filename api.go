@@ -1,8 +1,4 @@
 // Package warp is a userspace Cloudflare WARP client.
-//
-// It registers a WARP identity, runs WireGuard in-process over a gVisor
-// netstack, and exposes local SOCKS5 and HTTP proxies. No TUN device, no
-// admin rights, no cgo and no route table edits.
 package warp
 
 import (
@@ -24,14 +20,11 @@ import (
 const (
 	apiBase = "https://api.cloudflareclient.com/v0a1922"
 
-	// cfClientVersion is the last-known-good WARP client version. The register
-	// endpoint is lenient today, but a version it does not recognise can be
-	// rejected; bump it only after confirming registration still works.
+	// Confirm registration still works before bumping cfClientVersion.
 	cfClientVersion = "a-6.30-3596"
 	warpUserAgent   = "okhttp/3.12.1"
 )
 
-// apiError is returned for non-2xx WARP API responses.
 type apiError struct {
 	Method string
 	Path   string
@@ -102,8 +95,6 @@ func (a *api) request(ctx context.Context, method, path string, body, out any) e
 	return nil
 }
 
-// tlsDialContext dials with crypto/tls first and retries with a Chrome uTLS
-// fingerprint if the plain handshake is rejected. WARP_TLS=std|utls pins one.
 func tlsDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {

@@ -9,36 +9,16 @@ import (
 )
 
 const (
-	// minRotationEndpoints guards against calling a two-endpoint ping-pong
-	// "rotation": below this the verified pool cannot produce variety.
-	minRotationEndpoints = 3
-	// recentEgressWindow is the last N rotations whose egress Rotate refuses to
-	// report again. 5 is small enough that a pool of 6 distinct exits can cycle
-	// without repeating inside the window.
-	recentEgressWindow = 5
-	// recentEndpointWindow avoids walking back onto the same ingress.
-	recentEndpointWindow = 8
-	// rotationBudget bounds the whole endpoint walk. Probing one endpoint costs
-	// a handshake plus a trace; an unbounded walk over a 64-endpoint pool stalls
-	// the caller for minutes, which is worse than reporting failure.
-	rotationBudget = 10 * time.Second
-	// candidateProbeTimeout bounds a single ingress move (handshake + trace).
-	// Healthy moves finish in ~1.5s; without this a blackholed ingress can eat
-	// the whole rotation budget.
+	minRotationEndpoints  = 3
+	recentEgressWindow    = 5
+	recentEndpointWindow  = 8
+	rotationBudget        = 10 * time.Second
 	candidateProbeTimeout = 3 * time.Second
 )
 
-// Rotate finds a new egress address by moving to another handshake-verified
-// endpoint, preferring ingresses and exits it has not used recently. In-flight
-// proxied connections are never dropped: the netstack stays up and TCP
-// retransmits across the endpoint change.
-//
-// Only the endpoint axis exists. rotation_table.txt records this axis plus a
-// separate IPv4 measurement section (five endpoint swaps and five fresh
-// Register calls, all exiting the same IPv4 address), which is why a second
-// identity axis was not kept: it cannot move the pinned IPv4 egress, and the
-// IPv6 egress the upstream actually sees is already covered here.
 func (c *Client) Rotate(ctx context.Context) (old, next netip.Addr, err error) {
+	ctx, cancel := context.WithTimeout(ctx, rotationBudget)
+	defer cancel()
 	old, err = c.rotationEgress(ctx)
 	if err != nil {
 		return netip.Addr{}, netip.Addr{}, err
@@ -52,24 +32,15 @@ func (c *Client) Rotate(ctx context.Context) (old, next netip.Addr, err error) {
 		c.failRot.Add(1)
 		return old, old, fmt.Errorf("%w: only %d distinct endpoints verified", ErrNoNewEgress, len(eps))
 	}
-	// Every exit this client has ever rotated to is off limits. The current exit
-	// counts too, so returning to the pre-rotation address is a repeat.
 	c.noteUsedEgress(old)
 	cur := c.Stats().Endpoint
-	deadline := time.Now().Add(rotationBudget)
 	for _, ep := range c.rotationOrder(eps, cur) {
-		remaining := time.Until(deadline)
-		if remaining <= 0 || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			break
 		}
-		timeout := remaining
-		if timeout > candidateProbeTimeout {
-			timeout = candidateProbeTimeout
-		}
-		epCtx, cancel := context.WithTimeout(ctx, timeout)
+		epCtx, cancel := context.WithTimeout(ctx, candidateProbeTimeout)
 		err := c.setEndpoint(epCtx, ep)
 		if err != nil {
-			// Park failed ingresses at the back of the walk on later rotations.
 			c.noteEndpointEgress(ep.AddrPort, netip.Addr{})
 			cancel()
 			continue
@@ -86,21 +57,16 @@ func (c *Client) Rotate(ctx context.Context) (old, next netip.Addr, err error) {
 		}
 		c.noteRotation(ep.AddrPort, ip)
 		c.epRot.Add(1)
-		c.lastAxis.Store("endpoint")
 		return old, ip, nil
 	}
 	c.failRot.Add(1)
-	// Every candidate was rejected. Put the tunnel back on the ingress it
-	// started from so a failed rotation leaves the client where it was, not
-	// pointing at an ingress that failed its handshake.
+	// Failed walk leaves the device on the last ingress; put it back.
 	if err := c.restoreEndpoint(cur); err != nil {
 		return old, old, fmt.Errorf("%w: restore %s failed: %v", ErrNoNewEgress, cur, err)
 	}
 	return old, old, ErrNoNewEgress
 }
 
-// restoreEndpoint puts the tunnel back on ep if a failed walk left it
-// elsewhere. It uses its own context: the caller's is usually what expired.
 func (c *Client) restoreEndpoint(ep netip.AddrPort) error {
 	if !ep.IsValid() || c.Stats().Endpoint == ep {
 		return nil
@@ -110,8 +76,6 @@ func (c *Client) restoreEndpoint(ep netip.AddrPort) error {
 	return c.setEndpoint(rctx, Endpoint{AddrPort: ep})
 }
 
-// rotationEgress prefers IPv6 because netstack (and therefore the upstream)
-// uses the IPv6 egress when the destination is dual-stack.
 func (c *Client) rotationEgress(ctx context.Context) (netip.Addr, error) {
 	if ip, err := c.EgressIP6(ctx); err == nil {
 		return ip, nil
@@ -119,16 +83,13 @@ func (c *Client) rotationEgress(ctx context.Context) (netip.Addr, error) {
 	return c.EgressIP(ctx)
 }
 
-// rotationOrder visits the full verified pool from a random starting point:
-// endpoints cached as yielding an unused exit first (fast path), then unseen
-// endpoints, then endpoints known to yield an already-used exit or that failed
-// a handshake. The random start is the jitter that keeps consecutive runs off
-// the same ingress.
 func (c *Client) rotationOrder(eps []Endpoint, cur netip.AddrPort) []Endpoint {
 	c.recentMu.Lock()
 	used := make(map[netip.Addr]bool, len(c.usedEgress))
-	for _, ip := range c.usedEgress {
-		used[ip] = true
+	for i, ip := range c.usedEgress {
+		if !c.expired(i) {
+			used[ip] = true
+		}
 	}
 	recentEP := make(map[netip.AddrPort]bool, len(c.recentEP))
 	for _, ep := range c.recentEP {
@@ -168,25 +129,41 @@ func (c *Client) rotationOrder(eps []Endpoint, cur netip.AddrPort) []Endpoint {
 func (c *Client) egressUsed(ip netip.Addr) bool {
 	c.recentMu.Lock()
 	defer c.recentMu.Unlock()
-	_, ok := c.usedSet[ip]
-	return ok
+	i := c.usedIndex(ip)
+	return i >= 0 && !c.expired(i)
 }
 
-// noteUsedEgress records an exit for the lifetime of this client. Rotate never
-// hands the same address out twice, so a rotation always means a new IP.
+func (c *Client) expired(i int) bool {
+	w := c.cfg.EgressReuseWindow
+	return w > 0 && len(c.usedEgress)-1-i > w
+}
+
+func (c *Client) usedIndex(ip netip.Addr) int {
+	for i, used := range c.usedEgress {
+		if used == ip {
+			return i
+		}
+	}
+	return -1
+}
+
 func (c *Client) noteUsedEgress(ip netip.Addr) {
 	if !ip.IsValid() {
 		return
 	}
 	c.recentMu.Lock()
 	defer c.recentMu.Unlock()
-	if c.usedSet == nil {
-		c.usedSet = make(map[netip.Addr]struct{})
-	}
-	if _, ok := c.usedSet[ip]; ok {
+	c.markUsed(ip)
+}
+
+func (c *Client) markUsed(ip netip.Addr) {
+	i := c.usedIndex(ip)
+	if i >= 0 && !c.expired(i) {
 		return
 	}
-	c.usedSet[ip] = struct{}{}
+	if i >= 0 {
+		c.usedEgress = append(c.usedEgress[:i], c.usedEgress[i+1:]...)
+	}
 	c.usedEgress = append(c.usedEgress, ip)
 }
 
@@ -214,16 +191,9 @@ func (c *Client) noteRotation(ep netip.AddrPort, ip netip.Addr) {
 		c.epEgress = make(map[netip.AddrPort]netip.Addr)
 	}
 	c.epEgress[ep] = ip
-	if _, ok := c.usedSet[ip]; !ok {
-		if c.usedSet == nil {
-			c.usedSet = make(map[netip.Addr]struct{})
-		}
-		c.usedSet[ip] = struct{}{}
-		c.usedEgress = append(c.usedEgress, ip)
-	}
+	c.markUsed(ip)
 }
 
-// dedupeEndpoints keeps the first occurrence of each address:port.
 func dedupeEndpoints(eps []Endpoint) []Endpoint {
 	seen := make(map[netip.AddrPort]struct{}, len(eps))
 	out := make([]Endpoint, 0, len(eps))
